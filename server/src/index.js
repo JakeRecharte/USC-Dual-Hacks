@@ -48,6 +48,20 @@ const argsOf = (body) => {
   return { call, args: nested || rest };
 };
 
+// Caller's emotional state across the call. Only ever moves up: a caller who was
+// panicked a minute ago is not "calm" because they caught their breath.
+const STATES = ['calm', 'worried', 'distressed', 'panicked'];
+function noteCallerState(callId, state, source) {
+  if (!STATES.includes(state)) return sessions.get(callId)?.caller_state || null;
+  const s = sessions.get(callId) || sessions.upsert(callId, {});
+  const worst = STATES.indexOf(state) > STATES.indexOf(s.caller_state ?? 'calm') ? state : (s.caller_state || state);
+  if (worst !== s.caller_state) {
+    sessions.upsert(callId, { caller_state: worst });
+    sessions.bus.emit('emotion', { call_id: callId, caller_state: worst, source, distress_score: s.distress_score ?? 0, now: Date.now() });
+  }
+  return worst;
+}
+
 app.post('/fn/lookup_address', { preHandler: verifyRetell }, async (req, reply) => {
   const { call, args } = argsOf(req.body);
   const now = Date.now();
@@ -59,6 +73,7 @@ app.post('/fn/lookup_address', { preHandler: verifyRetell }, async (req, reply) 
 
   setImmediate(() => {
     sessions.upsert(call.call_id, { address: args.address, subject_name: args.subject_name, lookup });
+    noteCallerState(call.call_id, args.caller_state, 'agent');
     sessions.bus.emit('lookup', { call_id: call.call_id, address: args.address, subject_name: args.subject_name, ...lookup, now });
     req.log.info({ call_id: call.call_id, address: args.address, found: lookup.found, name_match: lookup.name_match, status: lookup.status }, 'lookup');
   });
@@ -68,6 +83,7 @@ app.post('/fn/log_call', { preHandler: verifyRetell }, async (req, reply) => {
   const { call, args } = argsOf(req.body);
   const now = Date.now();
   const session = sessions.get(call.call_id);
+  const callerState = noteCallerState(call.call_id, args.caller_state, 'agent');
   const payload = {
     mode: args.mode === 'routine' ? 'routine' : 'wildfire',
     address: args.address,
@@ -80,6 +96,7 @@ app.post('/fn/log_call', { preHandler: verifyRetell }, async (req, reply) => {
     last_contact_hours: args.last_contact_hours ?? null,
     vulnerability: args.vulnerability || {},
     red_flags: args.red_flags || {},
+    caller_state: callerState,
     call_id: call.call_id,
     from_number: call.from_number,
   };
@@ -135,10 +152,16 @@ app.post('/webhook/retell', { preHandler: verifyRetell }, async (req, reply) => 
       });
     } else if (event === 'transcript_updated') {
       const s = sessions.upsert(call.call_id, { transcript: call.transcript });
+      const distress = scoreDistress(call);
+      if (distress.score !== (s.distress_score ?? 0)) {
+        // Gauge for the board: how distressed the caller's words read, live.
+        sessions.upsert(call.call_id, { distress_score: distress.score });
+        sessions.bus.emit('emotion', { call_id: call.call_id, caller_state: s.caller_state || null, source: 'words',
+          distress_score: distress.score, reasons: distress.reasons, now: Date.now() });
+      }
       if (s.bypass_reason) return; // already escalated once; don't nag the agent
 
       const phrase = checkBypass(callerText(call));
-      const distress = phrase ? null : scoreDistress(call);
       if (!phrase && !distress.distressed) return;
 
       const kind = phrase ? 'emergency' : 'distress';
@@ -178,7 +201,7 @@ app.get('/health', async () => ({ ok: true }));
 
 // Server-sent events: every bus event, live. The console opens one EventSource and never
 // polls. First message is a full snapshot so a reconnect starts from current state.
-const STREAMED = ['lookup', 'call_logged', 'bypass', 'call_started', 'call_ended', 'call_analyzed'];
+const STREAMED = ['lookup', 'call_logged', 'bypass', 'emotion', 'call_started', 'call_ended', 'call_analyzed'];
 app.get('/events', (req, reply) => {
   reply.hijack();
   reply.raw.writeHead(200, {

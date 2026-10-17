@@ -17,11 +17,22 @@
         "subject_name": {
           "type": "string",
           "description": "First and last name of the person the caller is asking about."
+        },
+        "caller_state": {
+          "type": "string",
+          "enum": [
+            "calm",
+            "worried",
+            "distressed",
+            "panicked"
+          ],
+          "description": "Your read of the caller from everything they have said so far. worried = normal concern for someone they cannot reach. distressed = crying, pleading, struggling to answer. panicked = frantic, cannot think straight, screaming."
         }
       },
       "required": [
         "address",
-        "subject_name"
+        "subject_name",
+        "caller_state"
       ]
     }
   },
@@ -97,13 +108,24 @@
               "type": "boolean"
             }
           }
+        },
+        "caller_state": {
+          "type": "string",
+          "enum": [
+            "calm",
+            "worried",
+            "distressed",
+            "panicked"
+          ],
+          "description": "Your read of the caller from everything they have said so far. worried = normal concern for someone they cannot reach. distressed = crying, pleading, struggling to answer. panicked = frantic, cannot think straight, screaming."
         }
       },
       "required": [
         "mode",
         "address",
         "subject_name",
-        "with_them_now"
+        "with_them_now",
+        "caller_state"
       ]
     }
   },

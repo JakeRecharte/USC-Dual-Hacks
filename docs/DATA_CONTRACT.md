@@ -25,6 +25,7 @@ signature, and turns results into the sentence the agent reads out.
 |---|---|---|
 | `address` | string | Street number + street, digits not words: `"1420 Sunset Mesa Dr"` |
 | `subject_name` | string | Full name of the person they're calling about: `"Maria Lopez"` |
+| `caller_state` | `calm` \| `worried` \| `distressed` \| `panicked` | The agent's read of the caller so far (see §3a) |
 
 **Backend returns** (P2's `lookup_address(address, subject_name)`):
 
@@ -58,6 +59,7 @@ never says "empty". Example: *"An officer marked that address cleared at 9:02 AM
 | `last_contact_hours` | number \| null | Routine mode |
 | `vulnerability` | `{age, lives_alone, medical, mobility}` | Routine mode. `medical` is free text ("oxygen") or null |
 | `red_flags` | `{mail_piling, missed_meds, fall_history}` | Routine mode, booleans |
+| `caller_state` | `calm` \| `worried` \| `distressed` \| `panicked` | The agent's read of the caller. The server keeps the worst seen this call |
 
 **Server adds:** `call_id`, `from_number`, `created_at` (from Retell), `address_id` (from the lookup).
 
@@ -87,6 +89,20 @@ Evaluated top to bottom; first match wins. **Severity only moves a call up. No c
 | 8 | Routine mode, score < 4 | `scheduled_followup` | score |
 | 9 | Anything else | `priority_queue` | 3 (default is escalate) |
 
+### 3a. Caller state (emotion) can only move a call up
+
+Checked around the table above:
+
+| Caller state | Effect |
+|---|---|
+| `panicked` | `human_now`, severity 5, before any other rule |
+| `distressed` | if the table says `answered_by_agent` or `scheduled_followup`, it becomes `priority_queue` (severity ≥ 4) |
+| `worried`, `calm` | no change. Worried is the normal call on this line |
+
+Two sources: the agent's `caller_state` on each tool call, and a keyword score of the
+caller's words on every transcript chunk (panic phrases, the agent asking to repeat twice,
+repetition, fragments). Either one crossing the line interrupts the agent and transfers.
+
 **Routine score:** base from `last_contact_hours` (<12h → 1, <48h → 2, <168h → 3, ≥168h → 4),
 +1 per vulnerability (age ≥ 75, lives alone, medical, mobility) up to +2, +1 per red flag,
 capped at 5.
@@ -110,7 +126,8 @@ Until Supabase Realtime is on:
 | `snapshot` | `{ sessions, calls }` on connect |
 | `lookup` | `{ call_id, address, subject_name, found, name_match, status, recorded_at, inside_perimeter }` |
 | `call_logged` | the full `calls` row incl. `routing`, `severity`, `reason` |
-| `bypass` | `{ call_id, reason }` when emergency words are heard mid-sentence |
+| `bypass` | `{ call_id, kind, reasons }` when emergency words or distress are detected mid-sentence |
+| `emotion` | `{ call_id, caller_state, source: 'agent' \| 'words', distress_score, reasons? }` for the board's emotion gauge |
 | `call_started`, `call_ended` | Retell call lifecycle |
 
 ## Open questions for P2 / P4

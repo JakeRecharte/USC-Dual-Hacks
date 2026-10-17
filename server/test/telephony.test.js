@@ -162,6 +162,30 @@ test('handoff instruction tells the agent to transfer', () => {
   assert.match(handoffInstruction(['said "oh my god"']), /request_human.*transfer_to_human/);
 });
 
+const fresh = () => ({ found: true, name_match: true, status: 'cleared', recorded_at: new Date(now - 5 * 60000).toISOString(), inside_perimeter: true });
+
+test('caller state: worried leaves a fresh cleared record answered by the agent', () => {
+  assert.equal(route({ mode: 'wildfire', caller_state: 'worried' }, fresh(), now).routing, 'answered_by_agent');
+});
+
+test('caller state: distressed is never left with the agent alone', () => {
+  const d = route({ mode: 'wildfire', caller_state: 'distressed' }, fresh(), now);
+  assert.equal(d.routing, 'priority_queue');
+  assert.match(d.reason, /caller distressed/);
+  const r = route({ mode: 'routine', caller_state: 'distressed', last_contact_hours: 6 }, null, now);
+  assert.equal(r.routing, 'priority_queue');
+});
+
+test('caller state: panicked goes to a human now', () => {
+  assert.equal(route({ mode: 'wildfire', caller_state: 'panicked' }, fresh(), now).routing, 'human_now');
+});
+
+test('caller state never moves a call down', () => {
+  const refused = { found: true, name_match: true, status: 'refused', recorded_at: new Date(now).toISOString(), inside_perimeter: true };
+  assert.equal(route({ mode: 'wildfire', caller_state: 'calm' }, refused, now).routing, 'priority_queue');
+  assert.equal(route({ mode: 'wildfire', caller_state: 'calm', with_them_now: true }, fresh(), now).routing, 'human_now');
+});
+
 test('emergency overrides a fresh cleared record', () => {
   const lookup = { found: true, name_match: true, status: 'cleared', recorded_at: new Date(now - 5 * 60000).toISOString(), inside_perimeter: true };
   assert.equal(route({ mode: 'wildfire', emergency: true }, lookup, now).routing, 'human_now');

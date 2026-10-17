@@ -14,7 +14,20 @@ export function routineScore({ last_contact_hours, vulnerability = {}, red_flags
   return Math.min(score, 5);
 }
 
+// The caller's emotional state (the agent's read, see caller_state in tools.json) can only
+// move a call up: panicked → a human now; distressed → never left with the agent alone.
 export function route(call, lookup, now) {
+  if (call.caller_state === 'panicked' && !call.with_them_now && !call.emergency) {
+    return { routing: 'human_now', severity: 5, reason: 'caller panicked' };
+  }
+  const decision = routeOnFacts(call, lookup, now);
+  if (call.caller_state === 'distressed' && ['answered_by_agent', 'scheduled_followup'].includes(decision.routing)) {
+    return { routing: 'priority_queue', severity: Math.max(decision.severity, 4), reason: `${decision.reason}; caller distressed` };
+  }
+  return decision;
+}
+
+function routeOnFacts(call, lookup, now) {
   const status = lookup?.name_match ? lookup.status : null;
   const ageMin = lookup?.recorded_at ? (now - Date.parse(lookup.recorded_at)) / 60000 : Infinity;
 
