@@ -388,3 +388,12 @@ test('misheard house number: same street + the named resident finds the house; a
   assert.equal(ruth.address_id, '00000000-0000-4000-8000-000000000003');
   assert.equal((await lookupAddress({ address: '1680 Bollinger Drive', subject_name: 'John Smith' }, now)).found, false);
 });
+
+test('the agent and the board use the same fire perimeter', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const { PERIMETER } = await import('../src/geo.js');
+  const web = await readFile(new URL('../../web/src/lib/addresses.ts', import.meta.url), 'utf8');
+  const block = /export const PERIMETER[^=]*=\s*\[([\s\S]*?)\n\];/.exec(web)[1];
+  const board = [...block.matchAll(/\[\s*(-?\d+\.\d+)\s*,\s*(-?\d+\.\d+)\s*\]/g)].map((m) => [Number(m[1]), Number(m[2])]);
+  assert.deepEqual(PERIMETER, board, 'server/src/geo.js PERIMETER is out of date: copy it from web/src/lib/addresses.ts');
+});

@@ -43,23 +43,31 @@ const nul = (v) => (v === 'null' ? null : v);
 const [addrSql, statusSql] = seed.split('insert into public.status_log');
 const statuses = tuples(statusSql).map(([address_id, status, source, note, recorded]) =>
   ({ address_id, status, source, note: nul(note), recorded_at: when(recorded) }));
-const structures = tuples(addrSql.split('insert into public.addresses')[1] || '')
+// Households come from the seed too: P4 widened it from 30 to 79 at 11:40 and the database
+// still had 30, so statuses for the new ones failed the foreign key.
+const households = tuples(addrSql.split('insert into public.addresses')[1] || '')
   .filter((f) => f.length === 8)
-  .map(([id, , , , , , structure, at]) => ({ id, structure, structure_recorded_at: when(at) }));
+  .map(([id, address, lat, lng, zone_id, resident_name, structure, at]) =>
+    ({ id, address, lat: Number(lat), lng: Number(lng), zone_id, resident_name, structure, structure_recorded_at: when(at) }));
 
 const check = (what, { error }) => { if (error) throw new Error(`${what}: ${error.message}`); };
 
 // Validate everything before touching the database: a half-applied reset is worse than none.
 const bad = statuses.filter((r) => !r.address_id || !r.status || !r.recorded_at);
-if (statuses.length === 0 || bad.length) throw new Error(`seed parse failed (${statuses.length} rows, ${bad.length} bad): nothing changed`);
+const ids = new Set(households.map((h) => h.id));
+const orphans = statuses.filter((r) => !ids.has(r.address_id));
+const badHouses = households.filter((h) => !h.address || !Number.isFinite(h.lat) || !Number.isFinite(h.lng) || !h.resident_name);
+if (!statuses.length || !households.length || bad.length || orphans.length || badHouses.length) {
+  throw new Error(`seed parse failed (${households.length} households, ${statuses.length} statuses; ${bad.length} bad, ` +
+    `${orphans.length} orphaned, ${badHouses.length} bad households): nothing changed`);
+}
 
+// Non-destructive first (upsert households), destructive last, so a failure leaves data in place.
+check('upsert addresses', await db.from('addresses').upsert(households, { onConflict: 'id' }));
 check('clear status_log', await db.from('status_log').delete().not('address_id', 'is', null));
 check('insert status_log', await db.from('status_log').insert(statuses));
-for (const s of structures) {
-  check(`structure ${s.id}`, await db.from('addresses').update({ structure: s.structure, structure_recorded_at: s.structure_recorded_at }).eq('id', s.id));
-}
 if (!process.argv.includes('--keep-calls')) {
   check('clear calls', await db.from('calls').delete().not('call_id', 'is', null));
 }
 
-console.log(`reset: ${statuses.length} statuses re-based to now, ${structures.length} structures, call log ${process.argv.includes('--keep-calls') ? 'kept' : 'cleared'}`);
+console.log(`reset: ${households.length} households synced, ${statuses.length} statuses re-based to now, call log ${process.argv.includes('--keep-calls') ? 'kept' : 'cleared'}`);
