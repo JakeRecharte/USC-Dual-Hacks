@@ -1,5 +1,6 @@
 -- public.houses: the current state of every household, one row each (P1),
--- plus the dispatch dashboard's two columns on public.calls (reasoning, suggestions).
+-- plus the dispatch dashboard: two columns on public.calls (reasoning, suggestions) and the
+-- suggestion_decisions audit table.
 -- Run once in Supabase → SQL Editor, after SUPABASE_SETUP.md §1–2 and the three calls*.sql files.
 -- Safe to run twice.
 --
@@ -13,6 +14,27 @@
 alter table public.calls
   add column if not exists reasoning   jsonb,
   add column if not exists suggestions jsonb;
+
+-- A dispatcher's confirm/dismiss on a suggestion. Append-only: the audit trail of every human
+-- decision on an automated suggestion. Kept out of calls.suggestions because the server
+-- rewrites that column when a call is re-routed. The newest row per (call_id, suggestion_id) wins.
+create table if not exists public.suggestion_decisions (
+  id            uuid primary key default gen_random_uuid(),
+  call_id       text not null references public.calls(call_id) on delete cascade,
+  suggestion_id text not null,
+  resource      text,                 -- the suggestion's wording at the time it was decided
+  decision      text not null check (decision in ('confirmed', 'dismissed')),
+  decided_by    text not null,        -- the signed-in role
+  decided_at    timestamptz not null default now()
+);
+create index if not exists suggestion_decisions_by_call on public.suggestion_decisions (call_id, decided_at desc);
+alter table public.suggestion_decisions enable row level security;
+drop policy if exists "signed-in portals can read decisions" on public.suggestion_decisions;
+create policy "signed-in portals can read decisions"
+  on public.suggestion_decisions for select to authenticated using (true);
+do $$ begin
+  alter publication supabase_realtime add table public.suggestion_decisions;
+exception when duplicate_object then null; end $$;
 
 create table if not exists public.houses (
   id                        uuid primary key references public.addresses(id) on delete cascade,
