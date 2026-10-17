@@ -1,25 +1,52 @@
 'use client';
 
-import { useCallback, useMemo, useState } from 'react';
-import { ZONE_NAMES } from '@/lib/addresses';
-import { URGENCY_RANK, relativeMinutes, ageMinutes, sortByUrgency, urgencyOf } from '@/lib/priority';
+// The officer's screen: a map of where they are standing, and the houses within 150 feet of
+// them. No zone picker and no list — an officer on a street does not want to find their
+// block in a dropdown, they want the three houses in front of them to be tappable.
+//
+// Everything a tap does still goes through the offline queue, so the colour changes under
+// the officer's thumb whether or not there is a bar of signal, and `recorded_at` stays the
+// moment they tapped.
+
+import dynamic from 'next/dynamic';
+import { useCallback, useMemo, useRef, useState } from 'react';
+import { NEARBY_RADIUS_FT, NEARBY_RADIUS_M, nearest, within } from '@/lib/geo';
+import { useOfficerPosition, type GpsState } from '@/lib/officer-position';
 import { useOfflineQueue } from '@/lib/offline-queue';
+import { STATUS_COLOR, relativeMinutes, ageMinutes, urgencyOf } from '@/lib/priority';
 import { useAddresses, useNow } from '@/lib/use-live';
+import { STATUS_LABEL, STRUCTURE_LABEL } from '@/lib/types';
 import type { AddressState, Status, Structure } from '@/lib/types';
-import { ConnectionDot, SignOutButton, StatusChip, StructureChip } from '@/components/ui';
+import { ConnectionDot, SignOutButton, StatusChip } from '@/components/ui';
 
-/** The three buttons an officer presses at a door, in the order the plan specifies. */
-const STATUS_BUTTONS: { status: Status; label: string; tone: string }[] = [
-  { status: 'cleared', label: 'Cleared', tone: 'border-clear/60 bg-clear/15 text-clear active:bg-clear/30' },
-  { status: 'refused', label: 'Refused', tone: 'border-critical/60 bg-critical/15 text-critical active:bg-critical/30' },
-  { status: 'no_answer', label: 'No answer', tone: 'border-watch/60 bg-watch/15 text-watch active:bg-watch/30' },
+// MapLibre touches `window` at import time, so the map only ever loads in the browser —
+// the same arrangement the dispatcher's board uses. Here it also keeps the header and the
+// offline banner painting before a quarter of a megabyte of map arrives over LTE.
+const OfficerMap = dynamic(() => import('./officer-map').then((m) => m.OfficerMap), {
+  ssr: false,
+  loading: () => (
+    <div className="flex h-full w-full items-center justify-center text-sm text-muted">
+      Loading map…
+    </div>
+  ),
+});
+
+/**
+ * The three buttons an officer presses at a door, mapped onto the contracted statuses in
+ * docs/DATA_CONTRACT.md. The labels come from STATUS_LABEL rather than being written again
+ * here, so the officer's button, the dispatcher's board and the voice agent all say the same
+ * word about the same household.
+ */
+const DOOR_BUTTONS: { status: Status; help: string; tone: string }[] = [
+  { status: 'cleared', help: 'House is empty', tone: 'border-clear/60 bg-clear/20 text-clear active:bg-clear/35' },
+  { status: 'in_transit', help: 'Leaving now', tone: 'border-high/60 bg-high/20 text-high active:bg-high/35' },
+  { status: 'refused', help: 'Staying put', tone: 'border-critical/60 bg-critical/20 text-critical active:bg-critical/35' },
 ];
 
-const STRUCTURE_BUTTONS: { structure: Structure; label: string }[] = [
-  { structure: 'intact', label: 'Standing' },
-  { structure: 'damaged', label: 'Damaged' },
-  { structure: 'destroyed', label: 'Destroyed' },
-];
+const STRUCTURE_BUTTONS: Structure[] = ['intact', 'damaged', 'destroyed'];
+
+/** Houses to draw when the officer is standing somewhere with nothing within 150 feet. */
+const FALLBACK_COUNT = 8;
 
 export function OfficerPortal() {
   const { addresses, connection, patchLocal, setAddresses } = useAddresses();
@@ -31,43 +58,57 @@ export function OfficerPortal() {
   );
   const { pending, online, enqueue } = useOfflineQueue(applyRows);
 
-  const [zone, setZone] = useState<string | null>(null);
-  const [onlyUnresolved, setOnlyUnresolved] = useState(true);
-  const [shown, setShown] = useState(25);
+  const { position, mode, gps, route } = useOfficerPosition(addresses);
 
-  const zones = useMemo(() => {
-    const ids = [...new Set(addresses.map((a) => a.zone_id))];
-    return ids.sort((a, b) => a.localeCompare(b));
-  }, [addresses]);
+  const [follow, setFollow] = useState(true);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const recenterRef = useRef<(() => void) | null>(null);
+  const onRecenterReady = useCallback((fn: () => void) => {
+    recenterRef.current = fn;
+  }, []);
 
-  // Default to whichever assigned zone has the most doors left, so the app opens on work.
-  const activeZone = useMemo(() => {
-    if (zone && zones.includes(zone)) return zone;
-    const busiest = [...zones].sort(
-      (a, b) => unresolvedIn(addresses, b, now) - unresolvedIn(addresses, a, now),
-    )[0];
-    return busiest ?? null;
-  }, [zone, zones, addresses, now]);
+  /**
+   * The households in range. An officer standing on a stretch with no houses within 150
+   * feet gets the nearest handful instead: a map with something on it beats a map with
+   * nothing on it, and the distance is on screen either way.
+   */
+  const nearby = useMemo(() => {
+    if (!position) return [];
+    const here: [number, number] = [position.lat, position.lng];
+    const inRange = within(addresses, here, NEARBY_RADIUS_M);
+    return inRange.length > 0 ? inRange : nearest(addresses, here, FALLBACK_COUNT);
+  }, [addresses, position]);
 
-  const inZone = useMemo(
-    () => addresses.filter((a) => a.zone_id === activeZone),
-    [addresses, activeZone],
+  const inRangeCount = useMemo(
+    () => nearby.filter((n) => n.metres <= NEARBY_RADIUS_M).length,
+    [nearby],
   );
 
-  const matching = useMemo(() => {
-    const list = onlyUnresolved
-      ? inZone.filter((a) => URGENCY_RANK[urgencyOf(a, now)] <= URGENCY_RANK.watch)
-      : inZone;
-    return [...list].sort(sortByUrgency(now));
-  }, [inZone, onlyUnresolved, now]);
+  const selected = useMemo(
+    () => (selectedId ? (addresses.find((a) => a.id === selectedId) ?? null) : null),
+    [addresses, selectedId],
+  );
 
-  // A zone holds a few hundred households. The list is worst-first and an officer works the
-  // top of it, so drawing every card would cost a lot of phone for nothing.
-  const visible = useMemo(() => matching.slice(0, shown), [matching, shown]);
+  /**
+   * What the map draws. The selected house is kept in the set even once the officer has
+   * walked out of range of it, so the footprint under the open sheet never disappears
+   * mid-record.
+   */
+  const drawn = useMemo(() => {
+    const houses = nearby.map((n) => n.item);
+    if (selected && !houses.some((h) => h.id === selected.id)) houses.push(selected);
+    return houses;
+  }, [nearby, selected]);
 
-  const remaining = unresolvedIn(addresses, activeZone, now);
+  const distanceTo = useMemo(() => {
+    const byId = new Map(nearby.map((n) => [n.item.id, n.metres]));
+    return (id: string) => byId.get(id) ?? null;
+  }, [nearby]);
 
-  function record(address: AddressState, change: { status?: Status; structure?: Structure; note?: string | null }) {
+  function record(
+    address: AddressState,
+    change: { status?: Status; structure?: Structure; note?: string | null },
+  ) {
     const item = enqueue({ address_id: address.id, ...change });
     // Paint now. The tap is already durable in localStorage, online or not.
     patchLocal({
@@ -81,17 +122,45 @@ export function OfficerPortal() {
     });
   }
 
+  const recenter = () => {
+    setFollow(true);
+    recenterRef.current?.();
+  };
+
   return (
-    <div className="mx-auto flex min-h-dvh w-full max-w-xl flex-col">
-      <header className="sticky top-0 z-10 border-b border-line bg-bg/95 backdrop-blur">
-        <div className="flex items-center justify-between gap-3 px-4 pt-3.5">
-          <div className="flex items-center gap-2">
-            <span aria-hidden className="h-5 w-1 rounded-full bg-critical" />
-            <h1 className="text-base font-semibold tracking-tight">Door knocks</h1>
+    <div className="relative h-dvh w-full overflow-hidden bg-bg">
+      <div className="absolute inset-0">
+        <OfficerMap
+          households={drawn}
+          position={position}
+          route={route}
+          follow={follow}
+          selectedId={selectedId}
+          onSelect={setSelectedId}
+          onBreakFollow={() => setFollow(false)}
+          onRecenterReady={onRecenterReady}
+        />
+      </div>
+
+      {/* Header floats over the map: on a phone the map is the screen. */}
+      <header className="pointer-events-none absolute inset-x-0 top-0 z-20 p-3">
+        <div className="pointer-events-auto flex items-center justify-between gap-2 rounded-2xl border border-line bg-bg/92 px-3 py-2.5 backdrop-blur">
+          <div className="flex min-w-0 items-center gap-2">
+            <span aria-hidden className="h-5 w-1 shrink-0 rounded-full bg-critical" />
+            <div className="min-w-0">
+              <h1 className="truncate text-sm font-semibold leading-tight tracking-tight">
+                Door knocks
+              </h1>
+              <p className="truncate text-xs text-muted">
+                {position
+                  ? `${inRangeCount} within ${NEARBY_RADIUS_FT} ft`
+                  : 'Finding your position…'}
+              </p>
+            </div>
           </div>
-          <div className="flex items-center gap-2.5">
+          <div className="flex shrink-0 items-center gap-2">
             {pending.length > 0 ? (
-              <span className="inline-flex items-center gap-1.5 rounded-full border border-watch/50 bg-watch/15 px-2.5 py-0.5 text-xs font-semibold text-watch">
+              <span className="inline-flex items-center gap-1.5 rounded-full border border-watch/50 bg-watch/15 px-2.5 py-1 text-xs font-semibold text-watch">
                 {pending.length} to send
               </span>
             ) : (
@@ -101,207 +170,260 @@ export function OfficerPortal() {
           </div>
         </div>
 
-        <div className="scrollbar-none flex gap-2 overflow-x-auto px-4 py-3">
-          {zones.map((z) => {
-            const left = unresolvedIn(addresses, z, now);
-            const selected = z === activeZone;
-            return (
-              <button
-                key={z}
-                type="button"
-                onClick={() => {
-                  setZone(z);
-                  setShown(25);
-                }}
-                aria-pressed={selected}
-                className={`shrink-0 rounded-full border px-3.5 py-1.5 text-sm font-medium transition-colors ${
-                  selected ? 'border-info/70 bg-info/15 text-text' : 'border-line bg-panel text-muted'
-                }`}
-              >
-                {z}
-                <span className={`ml-1.5 text-xs ${left > 0 ? 'text-watch' : 'text-muted'}`}>{left}</span>
-              </button>
-            );
-          })}
-        </div>
+        <PositionNotice gps={gps} simulated={mode === 'simulated'} online={online} />
       </header>
 
-      <div className="flex items-baseline justify-between gap-3 px-4 pt-4">
-        <div className="min-w-0">
-          <p className="truncate text-sm font-medium">
-            {activeZone ? (ZONE_NAMES[activeZone] ?? activeZone) : 'No zone assigned'}
-          </p>
-          <p className="text-xs text-muted">
-            {remaining === 0
-              ? `All ${inZone.length} addresses resolved`
-              : `${remaining} of ${inZone.length} still need a knock`}
-          </p>
-        </div>
+      {/* Recenter sits above the sheet and clear of the thumb's resting place. */}
+      {!follow && position && (
         <button
           type="button"
-          onClick={() => {
-            setOnlyUnresolved((v) => !v);
-            setShown(25);
-          }}
-          className="shrink-0 rounded-lg border border-line px-2.5 py-1.5 text-xs font-medium text-muted transition-colors active:bg-panel-2"
+          onClick={recenter}
+          className={`absolute right-3 z-20 flex items-center gap-2 rounded-full border border-info/60 bg-bg/92 px-4 py-3 text-sm font-semibold text-info shadow-lg backdrop-blur active:bg-info/20 ${
+            selected ? 'bottom-[22rem]' : 'bottom-7'
+          }`}
         >
-          {onlyUnresolved ? 'Show all' : 'Needs a knock'}
+          <span aria-hidden>◎</span>
+          Recenter
         </button>
-      </div>
+      )}
 
-      <main className="flex-1 space-y-3 px-4 py-4">
-        {!online && (
-          <p className="rounded-xl border border-watch/40 bg-watch/10 px-3.5 py-2.5 text-xs leading-relaxed text-watch">
-            No signal. Keep working — every tap is saved with the time you made it and sent
-            automatically when you are back in range.
+      {!position && (
+        <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center">
+          <p className="rounded-xl border border-line bg-bg/92 px-4 py-3 text-sm text-muted backdrop-blur">
+            {addresses.length === 0 ? 'Loading the household list…' : 'Waiting for a position…'}
           </p>
-        )}
+        </div>
+      )}
 
-        {visible.length === 0 ? (
-          <p className="rounded-xl border border-line bg-panel px-4 py-10 text-center text-sm text-muted">
-            {addresses.length === 0 ? 'Loading your list…' : 'Nothing left in this zone.'}
-          </p>
-        ) : (
-          <>
-            {visible.map((a) => (
-              <AddressCard key={a.id} address={a} now={now} onRecord={record} />
-            ))}
-            {matching.length > visible.length && (
-              <button
-                type="button"
-                onClick={() => setShown((n) => n + 25)}
-                className="w-full rounded-xl border border-line bg-panel py-3.5 text-sm font-medium text-muted active:bg-panel-2"
-              >
-                Show 25 more · {(matching.length - visible.length).toLocaleString()} left
-              </button>
-            )}
-          </>
-        )}
-      </main>
+      {selected && (
+        <DoorSheet
+          address={selected}
+          metres={distanceTo(selected.id)}
+          now={now}
+          onRecord={record}
+          onClose={() => setSelectedId(null)}
+        />
+      )}
     </div>
   );
 }
 
-function AddressCard({
-  address,
-  now,
-  onRecord,
+/**
+ * Why the dot is where it is. Always on screen when the position is not a real fix: an
+ * officer must never be able to mistake a simulated walk for their own GPS, and a demo
+ * audience should be told rather than fooled.
+ */
+function PositionNotice({
+  gps,
+  simulated,
+  online,
 }: {
-  address: AddressState;
-  now: number;
-  onRecord: (a: AddressState, change: { status?: Status; structure?: Structure; note?: string | null }) => void;
+  gps: GpsState;
+  simulated: boolean;
+  online: boolean;
 }) {
-  const [open, setOpen] = useState(false);
-  const [note, setNote] = useState(address.note ?? '');
-  const urgency = urgencyOf(address, now);
-  const age = ageMinutes(address.recorded_at, now);
+  const notice = !simulated
+    ? null
+    : gps === 'demo'
+      ? 'Demo mode — simulated officer walking a block in Pacific Palisades.'
+      : gps === 'out_of_area'
+        ? 'You are outside the fire perimeter, so the map is showing a simulated walk through the households.'
+        : gps === 'denied'
+          ? 'Location permission is off. Showing a simulated walk — taps still record normally.'
+          : gps === 'timeout'
+            ? 'No GPS fix yet. Showing a simulated walk until one arrives.'
+            : gps === 'unavailable'
+              ? 'This device reports no location. Showing a simulated walk.'
+              : null;
 
   return (
-    <article className="rounded-2xl border border-line bg-panel p-4">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <h2 className="text-base font-semibold leading-tight">{address.address}</h2>
-          <p className="mt-0.5 truncate text-sm text-muted">{address.resident_name}</p>
-        </div>
-        <div className="flex shrink-0 flex-col items-end gap-1.5">
-          <StatusChip status={address.status} urgency={urgency} />
-          <StructureChip structure={address.structure} />
-        </div>
-      </div>
-
-      <p className="mt-2 text-xs text-muted">
-        {address.recorded_at
-          ? `${address.source === 'resident_reply' ? 'Resident replied' : 'Recorded'} ${relativeMinutes(Math.round(age))}`
-          : 'No contact recorded'}
-      </p>
-
-      {address.note && (
-        <p className="mt-2.5 rounded-lg border-l-2 border-critical/60 bg-panel-2 px-3 py-2 text-sm leading-relaxed">
-          {address.note}
+    <div className="mt-2 space-y-2">
+      {notice && (
+        <p className="pointer-events-auto flex items-start gap-2 rounded-xl border border-info/40 bg-bg/92 px-3 py-2 text-xs leading-relaxed text-info backdrop-blur">
+          <span className="mt-px shrink-0 rounded bg-info/20 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider">
+            Simulated
+          </span>
+          <span className="text-muted">{notice}</span>
         </p>
       )}
-
-      <div className="mt-3.5 grid grid-cols-3 gap-2">
-        {STATUS_BUTTONS.map((b) => (
-          <button
-            key={b.status}
-            type="button"
-            onClick={() => onRecord(address, { status: b.status, note: note.trim() || null })}
-            aria-current={address.status === b.status}
-            className={`rounded-xl border py-3.5 text-sm font-semibold transition-colors ${b.tone} ${
-              address.status === b.status ? 'ring-2 ring-inset ring-current' : ''
-            }`}
-          >
-            {b.label}
-          </button>
-        ))}
-      </div>
-
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        aria-expanded={open}
-        className="mt-3 flex w-full items-center justify-center gap-1.5 py-1 text-xs font-medium text-muted"
-      >
-        {open ? 'Hide' : 'Structure and notes'}
-        <span aria-hidden className={open ? 'rotate-180' : ''}>
-          ▾
-        </span>
-      </button>
-
-      {open && (
-        <div className="mt-1 space-y-3.5 border-t border-line pt-3.5">
-          <div>
-            <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted">
-              Is the house still standing?
-            </p>
-            <div className="grid grid-cols-3 gap-2">
-              {STRUCTURE_BUTTONS.map((b) => (
-                <button
-                  key={b.structure}
-                  type="button"
-                  onClick={() => onRecord(address, { structure: b.structure })}
-                  aria-current={address.structure === b.structure}
-                  className={`rounded-lg border py-2.5 text-sm font-medium transition-colors ${
-                    address.structure === b.structure
-                      ? 'border-info/70 bg-info/15 text-text'
-                      : 'border-line bg-panel-2 text-muted active:bg-line'
-                  }`}
-                >
-                  {b.label}
-                </button>
-              ))}
-            </div>
-            <p className="mt-2 text-xs leading-relaxed text-muted">
-              Dispatch only. Residents calling in are never told this over the phone.
-            </p>
-          </div>
-
-          <div>
-            <label
-              htmlFor={`note-${address.id}`}
-              className="mb-2 block text-xs font-semibold uppercase tracking-wider text-muted"
-            >
-              Note for dispatch
-            </label>
-            <textarea
-              id={`note-${address.id}`}
-              rows={2}
-              value={note}
-              onChange={(e) => setNote(e.target.value)}
-              maxLength={280}
-              placeholder="2 adults staying, 1 on oxygen"
-              className="w-full resize-none rounded-lg border border-line bg-panel-2 px-3 py-2.5 text-sm outline-none placeholder:text-muted/60 focus:border-info"
-            />
-            <p className="mt-1.5 text-xs text-muted">Sent with the next status you tap.</p>
-          </div>
-        </div>
+      {!online && (
+        <p className="pointer-events-auto rounded-xl border border-watch/40 bg-bg/92 px-3 py-2 text-xs leading-relaxed text-watch backdrop-blur">
+          No signal. Keep working — every tap is saved with the time you made it and sent
+          automatically when you are back in range.
+        </p>
       )}
-    </article>
+    </div>
   );
 }
 
-const unresolvedIn = (addresses: AddressState[], zone: string | null, now: number): number =>
-  addresses.filter(
-    (a) => a.zone_id === zone && URGENCY_RANK[urgencyOf(a, now)] <= URGENCY_RANK.watch,
-  ).length;
+/**
+ * The bottom sheet. Three full-width buttons an officer can hit without looking, and
+ * everything else behind one more tap:
+ *
+ *   * `no_answer` stays, as a secondary full-width button rather than a fourth equal one.
+ *     It is the most common outcome at a door and it is a contracted status the dispatcher
+ *     board and the voice agent both read, so dropping it would mean an officer who knocked
+ *     and got nothing records nothing at all.
+ *   * the structure buttons move in here behind "Damage and notes". They are a dispatcher-
+ *     only fact, they never move a household in the evacuation queue, and they are not what
+ *     the officer is doing at the door.
+ */
+function DoorSheet({
+  address,
+  metres,
+  now,
+  onRecord,
+  onClose,
+}: {
+  address: AddressState;
+  metres: number | null;
+  now: number;
+  onRecord: (
+    a: AddressState,
+    change: { status?: Status; structure?: Structure; note?: string | null },
+  ) => void;
+  onClose: () => void;
+}) {
+  const [extra, setExtra] = useState(false);
+  const [note, setNote] = useState(address.note ?? '');
+  const age = ageMinutes(address.recorded_at, now);
+
+  return (
+    <section
+      aria-label={`Record a status for ${address.address}`}
+      className="absolute inset-x-0 bottom-0 z-30 max-h-[85dvh] overflow-y-auto rounded-t-3xl border-t border-line bg-bg/97 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur"
+    >
+      <div className="px-4 pt-3">
+        <div aria-hidden className="mx-auto mb-3 h-1.5 w-12 rounded-full bg-line" />
+
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <h2 className="text-xl font-semibold leading-tight">{address.address}</h2>
+            <p className="mt-0.5 truncate text-sm text-muted">
+              {address.resident_name}
+              {metres != null && ` · ${Math.round(metres * 3.28084)} ft away`}
+            </p>
+          </div>
+          <span
+            aria-hidden
+            className="mt-1 h-4 w-4 shrink-0 rounded"
+            style={{ background: STATUS_COLOR[address.status] }}
+          />
+        </div>
+
+        <div className="mt-2.5 flex flex-wrap items-center gap-2">
+          <StatusChip status={address.status} urgency={urgencyOf(address, now)} size="md" />
+          <span className="text-xs text-muted">
+            {address.recorded_at
+              ? `${address.source === 'resident_reply' ? 'Resident replied' : 'Recorded'} ${relativeMinutes(Math.round(age))}`
+              : 'No contact recorded'}
+          </span>
+        </div>
+
+        {address.note && (
+          <p className="mt-2.5 rounded-lg border-l-2 border-critical/60 bg-panel-2 px-3 py-2 text-sm leading-relaxed">
+            {address.note}
+          </p>
+        )}
+
+        <div className="mt-3.5 space-y-2.5">
+          {DOOR_BUTTONS.map((b) => (
+            <button
+              key={b.status}
+              type="button"
+              onClick={() => onRecord(address, { status: b.status, note: note.trim() || null })}
+              aria-current={address.status === b.status}
+              className={`flex w-full items-baseline justify-between gap-3 rounded-2xl border px-5 py-5 text-left text-lg font-semibold transition-colors ${b.tone} ${
+                address.status === b.status ? 'ring-2 ring-inset ring-current' : ''
+              }`}
+            >
+              {STATUS_LABEL[b.status]}
+              <span className="text-xs font-medium uppercase tracking-wider opacity-70">{b.help}</span>
+            </button>
+          ))}
+
+          <button
+            type="button"
+            onClick={() => onRecord(address, { status: 'no_answer', note: note.trim() || null })}
+            aria-current={address.status === 'no_answer'}
+            className={`w-full rounded-2xl border border-line bg-panel py-4 text-base font-semibold text-muted transition-colors active:bg-panel-2 ${
+              address.status === 'no_answer' ? 'ring-2 ring-inset ring-watch text-watch' : ''
+            }`}
+          >
+            {STATUS_LABEL.no_answer}
+          </button>
+        </div>
+
+        <button
+          type="button"
+          onClick={() => setExtra((v) => !v)}
+          aria-expanded={extra}
+          className="mt-3 flex w-full items-center justify-center gap-1.5 py-3 text-sm font-medium text-muted"
+        >
+          {extra ? 'Hide' : 'Damage and notes'}
+          <span aria-hidden className={extra ? 'rotate-180' : ''}>
+            ▾
+          </span>
+        </button>
+
+        {extra && (
+          <div className="space-y-4 border-t border-line pt-3.5">
+            <div>
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted">
+                Is the house still standing?
+              </p>
+              <div className="grid grid-cols-3 gap-2">
+                {STRUCTURE_BUTTONS.map((s) => (
+                  <button
+                    key={s}
+                    type="button"
+                    onClick={() => onRecord(address, { structure: s })}
+                    aria-current={address.structure === s}
+                    className={`rounded-xl border py-3.5 text-sm font-medium transition-colors ${
+                      address.structure === s
+                        ? 'border-info/70 bg-info/15 text-text'
+                        : 'border-line bg-panel-2 text-muted active:bg-line'
+                    }`}
+                  >
+                    {STRUCTURE_LABEL[s]}
+                  </button>
+                ))}
+              </div>
+              <p className="mt-2 text-xs leading-relaxed text-muted">
+                Dispatch only. Residents calling in are never told this over the phone.
+              </p>
+            </div>
+
+            <div>
+              <label
+                htmlFor={`note-${address.id}`}
+                className="mb-2 block text-xs font-semibold uppercase tracking-wider text-muted"
+              >
+                Note for dispatch
+              </label>
+              <textarea
+                id={`note-${address.id}`}
+                rows={2}
+                value={note}
+                onChange={(e) => setNote(e.target.value)}
+                maxLength={280}
+                placeholder="2 adults staying, 1 on oxygen"
+                className="w-full resize-none rounded-lg border border-line bg-panel-2 px-3 py-2.5 text-base outline-none placeholder:text-muted/60 focus:border-info"
+              />
+              <p className="mt-1.5 text-xs text-muted">Sent with the next status you tap.</p>
+            </div>
+          </div>
+        )}
+
+        {/* Full-width, so closing the sheet needs no aim. Tapping the map also closes it. */}
+        <button
+          type="button"
+          onClick={onClose}
+          className="mt-3 w-full rounded-2xl border border-line bg-panel py-4 text-base font-semibold text-muted active:bg-panel-2"
+        >
+          Close
+        </button>
+      </div>
+    </section>
+  );
+}
