@@ -8,7 +8,7 @@ import * as sessions from './sessions.js';
 import * as backend from './backend.js';
 import { dbHealth } from './db.js';
 import { FRESH_MIN } from './routing.js';
-import { sayForLookup, sayForRouting } from './speech.js';
+import { sayForLookup, sayForRouting, sayResidentOut } from './speech.js';
 
 const app = Fastify({ logger: { level: 'info' } });
 const retell = config.retellApiKey ? new Retell({ apiKey: config.retellApiKey }) : null;
@@ -94,6 +94,9 @@ app.post('/fn/log_call', { preHandler: verifyRetell }, async (req, reply) => {
     emergency: args.emergency === true || Boolean(session?.bypass_reason),
     emergency_reason: session?.bypass_reason || null,
     caller_update: args.caller_update || null,
+    reported_status: ['staying', 'out'].includes(args.reported_status) ? args.reported_status : null,
+    reported_by: args.reported_by === 'resident' ? 'resident' : args.reported_status ? 'relative_or_friend' : null,
+    reported_minutes_ago: Number.isFinite(Number(args.reported_minutes_ago)) ? Number(args.reported_minutes_ago) : 0,
     last_contact_hours: args.last_contact_hours ?? null,
     vulnerability: args.vulnerability || {},
     red_flags: args.red_flags || {},
@@ -105,7 +108,9 @@ app.post('/fn/log_call', { preHandler: verifyRetell }, async (req, reply) => {
   const { row } = await backend.logCall(payload, now);
   const transfer = row.routing === 'human_now' || row.routing === 'priority_queue';
 
-  reply.send({ routing: row.routing, severity: row.severity, reason: row.reason, transfer, say: sayForRouting[row.routing] });
+  const say = row.routing === 'answered_by_agent' && payload.reported_by === 'resident' && payload.reported_status === 'out'
+    ? sayResidentOut(now) : sayForRouting[row.routing];
+  reply.send({ routing: row.routing, severity: row.severity, reason: row.reason, transfer, say });
 
   setImmediate(() => {
     sessions.upsert(call.call_id, { routing: row.routing, severity: row.severity, logged: true });

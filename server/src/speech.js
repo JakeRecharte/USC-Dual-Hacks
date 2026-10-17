@@ -25,6 +25,12 @@ export function sayForLookup(lookup, subjectName, now, freshMin) {
   const stale = lookup.recorded_at && (now - Date.parse(lookup.recorded_at)) / 60000 > freshMin
     ? ' That record is a few hours old, so it may not reflect what is happening now.' : '';
 
+  // A phone report is never presented as an officer's check.
+  if (lookup.source === 'call') {
+    if (lookup.status === 'refused') return `A phone report ${t}, says the people at that address were staying.${stale}`;
+    if (lookup.status === 'self_out') return `${first} called in ${t}, to say they were out of the area.${stale}`;
+  }
+
   switch (lookup.status) {
     case 'cleared':
       return `An officer marked that address as checked and cleared ${t}.${stale}`;
@@ -35,11 +41,14 @@ export function sayForLookup(lookup, subjectName, now, freshMin) {
     case 'refused':
       return `Our last record, from ${t.replace(/^at /, '')}, says the people at that address chose to stay.`;
     case 'no_answer':
-      return `An officer knocked ${t} and got no answer. That doesn't tell us whether anyone is inside.`;
+      return `An officer knocked ${t}, and got no answer. That doesn't tell us whether anyone is inside.`;
     default:
       return "We don't have a recorded check for that address yet.";
   }
 }
+
+// The resident told us they're out: confirm it back with the time, nothing more.
+export const sayResidentOut = (now) => `Thank you. I've recorded that you're out of the area, as of ${when(new Date(now).toISOString(), now).replace(/^at /, '').replace(/, just now$/, '')}.`;
 
 // Transfers say nothing here: the transfer tool itself says "Transferring you now."
 export const sayForRouting = {

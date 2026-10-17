@@ -45,6 +45,17 @@ function routeOnFacts(call, lookup, now) {
     return { routing: 'human_now', severity: 5,
       reason: call.with_them_now ? 'caller is with them now' : (call.emergency_reason || 'emergency') };
   }
+  // The resident calling about themselves is a first-hand report.
+  if (call.reported_by === 'resident' && call.reported_status === 'staying') {
+    return lookup?.inside_perimeter === false
+      ? { routing: 'priority_queue', severity: 4, reason: 'resident called: staying (outside the perimeter)' }
+      : { routing: 'human_now', severity: 5, reason: 'resident called: still at the address inside the perimeter' };
+  }
+  if (call.reported_by === 'resident' && call.reported_status === 'out') {
+    return status === 'refused'
+      ? { routing: 'priority_queue', severity: 4, reason: 'resident called to say out, but the house is marked staying' }
+      : { routing: 'answered_by_agent', severity: 1, reason: 'resident called: out of the area' };
+  }
   if (call.caller_update) {
     return { routing: 'priority_queue', severity: 4, reason: `caller update: ${call.caller_update}` };
   }

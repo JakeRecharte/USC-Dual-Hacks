@@ -5,6 +5,7 @@
 import { route } from './routing.js';
 import { db, dbFailed } from './db.js';
 import { pointInPolygon } from './geo.js';
+import { callReport } from './reports.js';
 
 // One address per scripted test case in team_plan.md, plus a stale and an outside one.
 // Ids match the board's seed (docs/SUPABASE_SETUP.md §3) so memory mode and Supabase agree.
@@ -124,14 +125,52 @@ function answer(row, latest, subject_name) {
   };
 }
 
-function lookupFake(key, subject_name, now) {
-  const row = FAKE_ADDRESSES.find((a) => addressKey(a.address) === key);
-  if (!row) return NOT_FOUND;
-  const latest = row.status === 'unknown' ? null : {
+// Memory mode's stand-in for status_log rows written by calls (see reports.js).
+const fakeReports = new Map();
+
+function fakeLatest(row, now) {
+  const seeded = row.status === 'unknown' ? null : {
     status: row.status, note: row.note, source: row.source,
     recorded_at: row.ago != null ? new Date(now - row.ago * 60000).toISOString() : null,
   };
-  return answer(row, latest, subject_name);
+  const reported = fakeReports.get(row.id);
+  if (!reported) return seeded;
+  return !seeded || Date.parse(reported.recorded_at) > Date.parse(seeded.recorded_at) ? reported : seeded;
+}
+
+function lookupFake(key, subject_name, now) {
+  const row = FAKE_ADDRESSES.find((a) => addressKey(a.address) === key);
+  if (!row) return NOT_FOUND;
+  return answer(row, fakeLatest(row, now), subject_name);
+}
+
+// The true newest status, regardless of who's asking. Server-side only (deciding whether a
+// phone report may be written); never returned to the agent.
+async function currentStatus(address, now) {
+  const key = addressKey(address);
+  if (!key) return null;
+  if (db) {
+    try {
+      const row = (await dbHouseholds(now)).find((a) => addressKey(a.address) === key);
+      if (!row) return null;
+      const { data, error } = await db.from('status_log').select('status').eq('address_id', row.id)
+        .order('recorded_at', { ascending: false }).limit(1);
+      if (error) throw error;
+      return { address_id: row.id, status: data[0]?.status ?? 'unknown' };
+    } catch (err) { dbFailed('current status', err); }
+  }
+  const row = FAKE_ADDRESSES.find((a) => addressKey(a.address) === key);
+  return row ? { address_id: row.id, status: fakeLatest(row, now)?.status ?? 'unknown' } : null;
+}
+
+async function writeReport(report, now) {
+  if (db) {
+    const { error } = await db.from('status_log').insert(report);
+    if (!error) return true;
+    dbFailed('status_log insert (call report)', error);
+  }
+  fakeReports.set(report.address_id, { ...report });
+  return true;
 }
 
 // Households change rarely, so they're cached briefly; statuses are always read fresh, because
@@ -232,7 +271,20 @@ export async function logCall(payload, now) {
   const lookup = await lookupAddress(payload, now);
   const prior_callers = priorCallers(payload, lookup.address_id);
   const decision = route({ ...payload, prior_callers }, lookup, now);
-  const row = upsertRow(payload.call_id, { ...payload, address_id: lookup.address_id, prior_callers, ...decision }, now);
+
+  // What the caller told us goes back into the sweep log, if it's allowed to (reports.js).
+  let report_written = null;
+  if (payload.reported_status) {
+    const report = callReport(payload, await currentStatus(payload.address, now), now);
+    if (report && !report.skip) {
+      await writeReport(report, now);
+      report_written = report.status;
+    } else if (report?.skip) {
+      decision.reason += `; not recorded: ${report.skip}`;
+    }
+  }
+
+  const row = upsertRow(payload.call_id, { ...payload, address_id: lookup.address_id, prior_callers, report_written, ...decision }, now);
   return { row, lookup };
 }
 

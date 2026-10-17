@@ -117,7 +117,7 @@ All in `bypass.js`, `distress.js`, `backend.js`, plus tests for every row in §2
 **Done when:** a hang-up, a declined transfer and a 3-caller pile-up each show up on the board
 with a reason.
 
-### Phase C: close the loop into the record (≈ 45 min, needs P2's `update_status`)
+### Phase C: close the loop into the record · ✅ DONE 10:55 (writes `status_log` directly; see DATA_CONTRACT §3b)
 
 This is the pitch's differentiator: calls *feed* the sweep log, not just read it.
 

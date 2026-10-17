@@ -9,6 +9,7 @@ import { lookupAddress, logCall, logUnrouted, logTransferFailed, getCall, addres
 import { route, routineScore, FRESH_MIN } from '../src/routing.js';
 import { sayForLookup, sayForRouting } from '../src/speech.js';
 import { scoreDistress, handoffInstruction } from '../src/distress.js';
+import { callReport } from '../src/reports.js';
 
 const now = Date.now();
 const wildfire = (address, subject_name, extra = {}) =>
@@ -296,4 +297,58 @@ test('Repeat callers never override a fresh cleared answer', async () => {
   const addr = { address: '820 Chautauqua Blvd', subject_name: 'Linda Park' };
   for (const [i, n] of ['+1310555021', '+1310555022', '+1310555023'].entries()) await logCall(base(`c${i}`, n, addr), now);
   assert.equal(getCall('c2').routing, 'answered_by_agent');
+});
+
+// ── Phase C: calls write back into the sweep log (reports.js) ──
+
+test('C: "he told me he is staying" from a relative is recorded as a phone report', () => {
+  const r = callReport({ reported_status: 'staying', reported_by: 'relative_or_friend', reported_minutes_ago: 20, caller_update: 'texted 20 min ago, staying' },
+    { address_id: 'x', status: 'cleared' }, now);
+  assert.equal(r.status, 'refused');
+  assert.equal(r.source, 'call');
+  assert.match(r.note, /relative or friend/);
+  assert.equal(Date.parse(r.recorded_at), now - 20 * 60000, 'recorded when the news is from, not now');
+});
+
+test('C: a relative saying "she is out" never clears a house', () => {
+  assert.ok(callReport({ reported_status: 'out', reported_by: 'relative_or_friend' }, { address_id: 'x', status: 'unknown' }, now).skip);
+});
+
+test('C: a resident saying "I am out" is recorded, unless the house is marked staying', () => {
+  assert.equal(callReport({ reported_status: 'out', reported_by: 'resident' }, { address_id: 'x', status: 'unknown' }, now).status, 'self_out');
+  assert.ok(callReport({ reported_status: 'out', reported_by: 'resident' }, { address_id: 'x', status: 'refused' }, now).skip);
+});
+
+test('C: nothing is written for an address we do not have', () => {
+  assert.ok(callReport({ reported_status: 'staying' }, null, now).skip);
+});
+
+test('C: resident still inside the perimeter goes to a person now and is recorded', async () => {
+  const { row } = await logCall({ ...base('rc1', '+13105550301'), address: '16800 Bollinger Dr', subject_name: 'Ruth Adams',
+    reported_status: 'staying', reported_by: 'resident', reported_minutes_ago: 0 }, now);
+  assert.equal(row.routing, 'human_now');
+  assert.equal(row.report_written, 'refused');
+  const next = await lookupAddress({ address: '16800 Bollinger Dr', subject_name: 'Ruth Adams' }, now + 60000);
+  assert.equal(next.status, 'refused');
+  assert.equal(next.source, 'call');
+  const say = sayForLookup(next, 'Ruth Adams', now + 60000, FRESH_MIN);
+  assert.match(say, /^A phone report at \d{1,2}:\d{2} [AP]M/);
+  assert.doesNotMatch(say, /officer/i, 'a phone report is never presented as an officer check');
+});
+
+test('C: resident out is answered and recorded; the next caller hears it with the time', async () => {
+  const { row } = await logCall({ ...base('rc2', '+13105550302'), address: '910 N Vermont Ave', subject_name: 'Kevin Nguyen',
+    mode: 'wildfire', reported_status: 'out', reported_by: 'resident' }, now);
+  assert.equal(row.routing, 'answered_by_agent');
+  const next = await lookupAddress({ address: '910 N Vermont Ave', subject_name: 'Kevin Nguyen' }, now + 60000);
+  assert.match(sayForLookup(next, 'Kevin Nguyen', now + 60000, FRESH_MIN), /^Kevin called in at .*, to say they were out of the area/);
+});
+
+test('C: resident says out but the house is marked staying: a person checks, record unchanged', async () => {
+  const { row } = await logCall({ ...base('rc3', '+13105550303'), address: '1515 Via de la Paz', subject_name: 'Harold Kim',
+    reported_status: 'out', reported_by: 'resident' }, now);
+  assert.equal(row.routing, 'priority_queue');
+  assert.equal(row.report_written, null);
+  assert.match(row.reason, /not recorded/);
+  assert.equal((await lookupAddress({ address: '1515 Via de la Paz', subject_name: 'Harold Kim' }, now)).status, 'refused');
 });

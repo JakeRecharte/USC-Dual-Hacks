@@ -60,6 +60,9 @@ never says "empty". Example: *"An officer marked that address cleared at 9:02 AM
 | `vulnerability` | `{age, lives_alone, medical, mobility}` | Routine mode. `medical` is free text ("oxygen") or null |
 | `red_flags` | `{mail_piling, missed_meds, fall_history}` | Routine mode, booleans |
 | `caller_state` | `calm` \| `worried` \| `distressed` \| `panicked` | The agent's read of the caller. The server keeps the worst seen this call |
+| `reported_status` | `staying` \| `out` \| null | Where the caller says the person is (§3b) |
+| `reported_by` | `resident` \| `relative_or_friend` | `resident` = calling about themselves |
+| `reported_minutes_ago` | number | How old that news is ("texted 20 min ago" = 20) |
 
 **Server adds:** `call_id`, `from_number`, `created_at` (from Retell), `address_id` (from the lookup).
 
@@ -102,6 +105,21 @@ Checked around the table above:
 Two sources: the agent's `caller_state` on each tool call, and a keyword score of the
 caller's words on every transcript chunk (panic phrases, the agent asking to repeat twice,
 repetition, fragments). Either one crossing the line interrupts the agent and transfers.
+
+### 3b. Calls write back into `status_log` (source `call`)
+
+A phone report is weaker than an officer at the door, so it can only raise concern:
+
+| Caller says | Written to `status_log` | Routing |
+|---|---|---|
+| Relative/friend: "he's staying" | `refused`, note "phone report (relative or friend): …", `recorded_at` = when the news is from | `priority_queue` |
+| Resident: "I'm still here" | `refused`, note "phone report (resident): …" | `human_now` (inside perimeter) |
+| Resident: "I've left" | `self_out`, unless the house is marked `refused` | `answered_by_agent`; if marked staying, `priority_queue`, nothing written |
+| Relative/friend: "she's out" | **nothing**: a third-hand "out" never takes a house off the door-knock list | as the record says |
+
+The next caller hears it attributed: *"A phone report at 10:34 AM, about 15 minutes ago, says
+the people at that address were staying."* Never as an officer's check. A `refused` from a call
+puts the house on the board's door-knock list like any other.
 
 **Routine score:** base from `last_contact_hours` (<12h → 1, <48h → 2, <168h → 3, ≥168h → 4),
 +1 per vulnerability (age ≥ 75, lives alone, medical, mobility) up to +2, +1 per red flag,

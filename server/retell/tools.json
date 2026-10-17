@@ -118,6 +118,26 @@
             "panicked"
           ],
           "description": "Your read of the caller from everything they have said so far. worried = normal concern for someone they cannot reach. distressed = crying, pleading, struggling to answer. panicked = frantic, cannot think straight, screaming."
+        },
+        "reported_status": {
+          "type": "string",
+          "enum": [
+            "staying",
+            "out"
+          ],
+          "description": "Only if the caller has newer first- or second-hand information on where the person is: staying = still at the address / refusing to leave; out = has left the area. Omit if unknown."
+        },
+        "reported_by": {
+          "type": "string",
+          "enum": [
+            "resident",
+            "relative_or_friend"
+          ],
+          "description": "resident = the caller IS the person who lives at the address, calling about themselves."
+        },
+        "reported_minutes_ago": {
+          "type": "number",
+          "description": "How old that information is, in minutes (\"he texted 20 minutes ago\" = 20). 0 if the caller is telling you right now."
         }
       },
       "required": [
