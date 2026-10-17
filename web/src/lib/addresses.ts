@@ -125,14 +125,12 @@ const ZONES: ZoneSpec[] = [
   },
 ];
 
-export const ZONE_NAMES: Record<string, string> = {
-  ...Object.fromEntries(ZONES.map((z) => [z.id, z.name])),
-  'LAC-9': 'Crenshaw (outside)',
-  'LAE-2': 'East Hollywood (outside)',
-};
+export const ZONE_NAMES: Record<string, string> = Object.fromEntries(
+  ZONES.map((z) => [z.id, z.name]),
+);
 
 /** The order zones appear in, for the officer's zone strip. */
-export const ZONE_ORDER: string[] = [...ZONES.map((z) => z.id), 'LAC-9', 'LAE-2'];
+export const ZONE_ORDER: string[] = ZONES.map((z) => z.id);
 
 interface Seed {
   id: string;
@@ -149,9 +147,14 @@ interface Seed {
 }
 
 /**
- * The explicit households. The first seven are copied from server/src/backend.js and must not
- * drift from it; `640 Toyopa Dr` is the address docs/DEMO_SCRIPT.md marks in beat 2, so it
- * starts genuinely unknown and never carries a seeded status.
+ * The explicit households. a1–a5 are copied from server/src/backend.js and must not drift
+ * from it; `640 Toyopa Dr` is the address docs/DEMO_SCRIPT.md marks in beat 2, so it starts
+ * genuinely unknown and never carries a seeded status.
+ *
+ * The agent's a6 and a7 (Crenshaw, Vermont) are deliberately absent: this board covers one
+ * incident, and anything outside the perimeter is not its business. The agent still handles
+ * those calls — it just does not put them on this map. Ids stay as they are so the two
+ * systems still name the same households.
  */
 const NARRATIVE: Seed[] = [
   { id: 'a1', address: '1420 Sunset Mesa Dr', lat: 34.0376, lng: -118.5793, zone_id: 'PAL-01',
@@ -165,10 +168,6 @@ const NARRATIVE: Seed[] = [
     resident_name: 'Tom Becker', status: 'cleared', source: 'officer', ago_min: 360 },
   { id: 'a5', address: '820 Chautauqua Blvd', lat: 34.0332, lng: -118.5213, zone_id: 'PAL-06',
     resident_name: 'Linda Park', status: 'self_out', source: 'resident_reply', ago_min: 55 },
-  { id: 'a6', address: '4512 Crenshaw Blvd', lat: 34.0031, lng: -118.3349, zone_id: 'LAC-9',
-    resident_name: 'Dorothy Hayes', status: 'unknown', source: null, ago_min: null },
-  { id: 'a7', address: '910 N Vermont Ave', lat: 34.0902, lng: -118.2921, zone_id: 'LAE-2',
-    resident_name: 'Kevin Nguyen', status: 'unknown', source: null, ago_min: null },
   { id: 'a8', address: '640 Toyopa Dr', lat: 34.0401, lng: -118.5232, zone_id: 'PAL-06',
     resident_name: 'Beatrice Lam', status: 'unknown', source: null, ago_min: null },
 ];
@@ -217,7 +216,9 @@ function ageFor(status: Status, rand: () => number): number | null {
 function generate(): Seed[] {
   const rand = rng(20261017);
   const out: Seed[] = [];
-  let n = NARRATIVE.length;
+  // Continue past the highest explicit id rather than counting them, so ids stay stable
+  // even though a6 and a7 are not on this board.
+  let n = Math.max(...NARRATIVE.map((s) => Number(s.id.slice(1))));
   let refusalNote = 0;
   let nameIndex = 0;
 
@@ -280,8 +281,9 @@ export function seedAddresses(now: number = Date.now()): AddressState[] {
     const at = ago_min == null ? null : new Date(now - ago_min * 60_000).toISOString();
     return {
       ...row,
-      // Computed, never stored: the contract has no inside_perimeter column.
-      inside_perimeter: row.zone_id.startsWith('PAL-'),
+      // Every seeded household is inside by construction; a test asserts it against the
+      // polygon, which is what the Supabase path computes from.
+      inside_perimeter: true,
       note: note ?? null,
       recorded_at: at,
       structure: structure ?? 'unassessed',

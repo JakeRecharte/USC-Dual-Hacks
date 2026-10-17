@@ -61,13 +61,14 @@ describe('joinRows', () => {
     assert.equal(rows[0].status, 'cleared');
   });
 
-  it('computes inside_perimeter rather than trusting a column', () => {
+  it('drops households outside the perimeter instead of showing them', () => {
     const rows = joinRows(
       [address(), address({ id: 'a6', lat: 34.0031, lng: -118.3349, address: '4512 Crenshaw Blvd' })],
       [],
     );
-    assert.equal(rows.find((r) => r.id === 'a1')!.inside_perimeter, true);
-    assert.equal(rows.find((r) => r.id === 'a6')!.inside_perimeter, false);
+    // The board covers one incident: whatever else the table holds, it cannot reach the map.
+    assert.deepEqual(rows.map((r) => r.id), ['a1']);
+    assert.equal(rows[0].inside_perimeter, true);
   });
 
   it('degrades a missing structure column to "not assessed" instead of blanking the row', () => {

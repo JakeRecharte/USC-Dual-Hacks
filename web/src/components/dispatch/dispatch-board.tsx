@@ -533,7 +533,8 @@ const DEMO_CALLS: { label: string; row: Omit<CallRow, 'id' | 'call_id' | 'create
       mode: 'routine',
       address: '4512 Crenshaw Blvd',
       subject_name: 'Dorothy Hayes',
-      address_id: 'a6',
+      // Outside the incident, so it is not on this map — which is the dual-use point.
+      address_id: null,
       routing: 'priority_queue',
       severity: 4,
       reason: 'routine welfare check, score 4 — 5 days, lives alone, mail piling up',
