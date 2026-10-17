@@ -10,7 +10,9 @@ export type LatLngTuple = [number, number];
  * park edge, then east to the Santa Monica line and back along the shore.
  *
  * The shore edge hugs the southernmost houses along PCH (about 50 m past them), so the
- * beach and the surf stay outside the line. Every tracked household is still inside.
+ * beach and the surf stay outside the line. Of the 8,103 building footprints, 15 fall
+ * outside it, all of them seaward of PCH: a beach club and a handful of lifeguard towers
+ * and restrooms. No dwelling is excluded.
  */
 export const PERIMETER: LatLngTuple[] = [
   [34.0382, -118.5895],

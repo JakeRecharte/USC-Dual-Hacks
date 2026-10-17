@@ -4,7 +4,7 @@
 // officer map opens on an empty street somewhere in Los Angeles County — correct behaviour,
 // useless demo. So when the real fix lands outside the perimeter (or the demo flag is set)
 // the position is driven from a short walking route built out of the loaded households,
-// which guarantees there are always doors within 150 feet.
+// which guarantees there are always doors in range.
 //
 // Pure, with distance injected as a parameter of position rather than wall-clock time, so
 // it can be tested and so the walk is reproducible.
@@ -32,8 +32,8 @@ export const DEMO_WALK_STOPS = 6;
  * radius would leave the chain stuck at one stop here. 130 m takes in the real spacing and
  * still rejects the hop across a canyon that happens once the near households run out.
  *
- * It is longer than the 150 ft draw radius, so the officer does walk through stretches with
- * no tracked household in range. That is what the map's nearest-handful fallback is for.
+ * Every building is now a tracked household, so legs this long still pass doors the whole
+ * way; the cap is about the walk reading as a walk rather than a hop across a canyon.
  */
 const MAX_LEG_M = 130;
 

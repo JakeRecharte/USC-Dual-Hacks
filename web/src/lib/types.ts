@@ -46,7 +46,13 @@ export interface AddressRow {
 }
 
 /** An address joined to its newest status_log row, which is what both portals render. */
+/** houses.color: decided in Supabase from the record and the Retell calls (docs/sql/house_colors.sql). */
+export type HouseColor = 'green' | 'yellow' | 'red';
+
 export interface AddressState extends AddressRow {
+  /** Supabase's colour for this house; absent until house_colors.sql has run. */
+  color?: HouseColor | null;
+  color_reason?: string | null;
   status: Status;
   source: Source | null;
   /** ISO string, or null when nothing has ever been recorded. Always shown to the user. */

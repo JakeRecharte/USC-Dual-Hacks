@@ -1,8 +1,8 @@
 'use client';
 
-// The officer's screen: a map of where they are standing, and the houses within 150 feet of
-// them. No zone picker and no list — an officer on a street does not want to find their
-// block in a dropdown, they want the three houses in front of them to be tappable.
+// The officer's screen: a map of where they are standing, with every tracked household on
+// it. No zone picker and no list — an officer on a street does not want to find their block
+// in a dropdown, they want the houses in front of them to be tappable.
 //
 // Everything a tap does still goes through the offline queue, so the colour changes under
 // the officer's thumb whether or not there is a bar of signal, and `recorded_at` stays the
@@ -10,8 +10,8 @@
 
 import dynamic from 'next/dynamic';
 import { useCallback, useMemo, useRef, useState } from 'react';
-import { NEARBY_RADIUS_FT, NEARBY_RADIUS_M, nearest, within } from '@/lib/geo';
-import { useOfficerPosition, type GpsState } from '@/lib/officer-position';
+import { NEARBY_RADIUS_FT, NEARBY_RADIUS_M, distanceMetres, within } from '@/lib/geo';
+import { useOfficerPosition, type GpsState, type SimControl } from '@/lib/officer-position';
 import { useOfflineQueue } from '@/lib/offline-queue';
 import { STATUS_COLOR, relativeMinutes, ageMinutes, urgencyOf } from '@/lib/priority';
 import { useAddresses, useNow } from '@/lib/use-live';
@@ -45,9 +45,6 @@ const DOOR_BUTTONS: { status: Status; help: string; tone: string }[] = [
 
 const STRUCTURE_BUTTONS: Structure[] = ['intact', 'damaged', 'destroyed'];
 
-/** Houses to draw when the officer is standing somewhere with nothing within 150 feet. */
-const FALLBACK_COUNT = 8;
-
 export function OfficerPortal() {
   const { addresses, connection, patchLocal, setAddresses } = useAddresses();
   const now = useNow(10_000);
@@ -58,7 +55,7 @@ export function OfficerPortal() {
   );
   const { pending, online, enqueue } = useOfflineQueue(applyRows);
 
-  const { position, mode, gps, route } = useOfficerPosition(addresses);
+  const { position, mode, gps, route, control, setControl } = useOfficerPosition(addresses);
 
   const [follow, setFollow] = useState(true);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -68,20 +65,14 @@ export function OfficerPortal() {
   }, []);
 
   /**
-   * The households in range. An officer standing on a stretch with no houses within 150
-   * feet gets the nearest handful instead: a map with something on it beats a map with
-   * nothing on it, and the distance is on screen either way.
+   * How many doors the officer is standing at. A count and a ring on the map — it decides
+   * nothing about what gets drawn. Every tracked household is on the map at all times:
+   * hiding a house because the officer took two steps away from it made the map flicker
+   * and made houses unclickable for no good reason.
    */
-  const nearby = useMemo(() => {
-    if (!position) return [];
-    const here: [number, number] = [position.lat, position.lng];
-    const inRange = within(addresses, here, NEARBY_RADIUS_M);
-    return inRange.length > 0 ? inRange : nearest(addresses, here, FALLBACK_COUNT);
-  }, [addresses, position]);
-
   const inRangeCount = useMemo(
-    () => nearby.filter((n) => n.metres <= NEARBY_RADIUS_M).length,
-    [nearby],
+    () => (position ? within(addresses, [position.lat, position.lng], NEARBY_RADIUS_M).length : 0),
+    [addresses, position],
   );
 
   const selected = useMemo(
@@ -89,21 +80,11 @@ export function OfficerPortal() {
     [addresses, selectedId],
   );
 
-  /**
-   * What the map draws. The selected house is kept in the set even once the officer has
-   * walked out of range of it, so the footprint under the open sheet never disappears
-   * mid-record.
-   */
-  const drawn = useMemo(() => {
-    const houses = nearby.map((n) => n.item);
-    if (selected && !houses.some((h) => h.id === selected.id)) houses.push(selected);
-    return houses;
-  }, [nearby, selected]);
-
-  const distanceTo = useMemo(() => {
-    const byId = new Map(nearby.map((n) => [n.item.id, n.metres]));
-    return (id: string) => byId.get(id) ?? null;
-  }, [nearby]);
+  /** How far the officer is from the house the sheet is about, for the "N ft away" line. */
+  const metresToSelected = useMemo(
+    () => (position && selected ? distanceMetres([position.lat, position.lng], [selected.lat, selected.lng]) : null),
+    [position, selected],
+  );
 
   function record(
     address: AddressState,
@@ -131,11 +112,14 @@ export function OfficerPortal() {
     <div className="relative h-dvh w-full overflow-hidden bg-bg">
       <div className="absolute inset-0">
         <OfficerMap
-          households={drawn}
+          households={addresses}
           position={position}
           route={route}
           follow={follow}
           selectedId={selectedId}
+          // Driving emits 20 positions a second; easing each one would lag a frame behind
+          // the key. GPS and the auto walk arrive once a second and ease smoothly.
+          continuous={mode === 'simulated' && control === 'manual'}
           onSelect={setSelectedId}
           onBreakFollow={() => setFollow(false)}
           onRecenterReady={onRecenterReady}
@@ -144,7 +128,7 @@ export function OfficerPortal() {
 
       {/* Header floats over the map: on a phone the map is the screen. */}
       <header className="pointer-events-none absolute inset-x-0 top-0 z-20 p-3">
-        <div className="pointer-events-auto flex items-center justify-between gap-2 rounded-2xl border border-line bg-bg/92 px-3 py-2.5 backdrop-blur">
+        <div className="pointer-events-auto flex items-center justify-between gap-2 rounded-2xl border border-line bg-bg px-3 py-2.5">
           <div className="flex min-w-0 items-center gap-2">
             <span aria-hidden className="h-5 w-1 shrink-0 rounded-full bg-critical" />
             <div className="min-w-0">
@@ -170,7 +154,13 @@ export function OfficerPortal() {
           </div>
         </div>
 
-        <PositionNotice gps={gps} simulated={mode === 'simulated'} online={online} />
+        <PositionNotice
+          gps={gps}
+          simulated={mode === 'simulated'}
+          online={online}
+          control={control}
+          onControl={setControl}
+        />
       </header>
 
       {/* Recenter sits above the sheet and clear of the thumb's resting place. */}
@@ -178,7 +168,7 @@ export function OfficerPortal() {
         <button
           type="button"
           onClick={recenter}
-          className={`absolute right-3 z-20 flex items-center gap-2 rounded-full border border-info/60 bg-bg/92 px-4 py-3 text-sm font-semibold text-info shadow-lg backdrop-blur active:bg-info/20 ${
+          className={`absolute right-3 z-20 flex items-center gap-2 rounded-full border border-info/60 bg-bg px-4 py-3 text-sm font-semibold text-info shadow-lg active:bg-info/20 ${
             selected ? 'bottom-[22rem]' : 'bottom-7'
           }`}
         >
@@ -189,7 +179,7 @@ export function OfficerPortal() {
 
       {!position && (
         <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center">
-          <p className="rounded-xl border border-line bg-bg/92 px-4 py-3 text-sm text-muted backdrop-blur">
+          <p className="rounded-xl border border-line bg-bg px-4 py-3 text-sm text-muted">
             {addresses.length === 0 ? 'Loading the household list…' : 'Waiting for a position…'}
           </p>
         </div>
@@ -198,7 +188,7 @@ export function OfficerPortal() {
       {selected && (
         <DoorSheet
           address={selected}
-          metres={distanceTo(selected.id)}
+          metres={metresToSelected}
           now={now}
           onRecord={record}
           onClose={() => setSelectedId(null)}
@@ -207,6 +197,17 @@ export function OfficerPortal() {
     </div>
   );
 }
+
+const SIMULATED_REASON: Record<GpsState, string | null> = {
+  live: null,
+  locating: 'Finding your GPS. Showing a simulated walk until it arrives.',
+  demo: 'Demo mode — simulated officer walking a block in Pacific Palisades.',
+  out_of_area:
+    'You are outside the fire perimeter, so the map is showing a simulated walk through the households.',
+  denied: 'Location permission is off. Showing a simulated walk — taps still record normally.',
+  timeout: 'No GPS fix yet. Showing a simulated walk until one arrives.',
+  unavailable: 'This device reports no location. Showing a simulated walk.',
+};
 
 /**
  * Why the dot is where it is. Always on screen when the position is not a real fix: an
@@ -217,37 +218,56 @@ function PositionNotice({
   gps,
   simulated,
   online,
+  control,
+  onControl,
 }: {
   gps: GpsState;
   simulated: boolean;
   online: boolean;
+  control: SimControl;
+  onControl: (next: SimControl) => void;
 }) {
-  const notice = !simulated
-    ? null
-    : gps === 'demo'
-      ? 'Demo mode — simulated officer walking a block in Pacific Palisades.'
-      : gps === 'out_of_area'
-        ? 'You are outside the fire perimeter, so the map is showing a simulated walk through the households.'
-        : gps === 'denied'
-          ? 'Location permission is off. Showing a simulated walk — taps still record normally.'
-          : gps === 'timeout'
-            ? 'No GPS fix yet. Showing a simulated walk until one arrives.'
-            : gps === 'unavailable'
-              ? 'This device reports no location. Showing a simulated walk.'
-              : null;
+  // One line per reason the dot is not a real fix. `live` never reaches here, and
+  // `locating` does: the walk starts straight away so the officer has a usable map, which
+  // means it has to be labelled straight away too.
+  const notice = simulated ? SIMULATED_REASON[gps] : null;
 
   return (
     <div className="mt-2 space-y-2">
       {notice && (
-        <p className="pointer-events-auto flex items-start gap-2 rounded-xl border border-info/40 bg-bg/92 px-3 py-2 text-xs leading-relaxed text-info backdrop-blur">
-          <span className="mt-px shrink-0 rounded bg-info/20 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider">
-            Simulated
-          </span>
-          <span className="text-muted">{notice}</span>
-        </p>
+        <div className="pointer-events-auto rounded-xl border border-info/40 bg-bg px-3 py-2">
+          <p className="flex items-start gap-2 text-xs leading-relaxed text-info">
+            <span className="mt-px shrink-0 rounded bg-info/20 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider">
+              Simulated
+            </span>
+            <span className="text-muted">{notice}</span>
+          </p>
+          <div className="mt-2 flex items-center justify-between gap-3 border-t border-line pt-2">
+            <p className="text-[11px] leading-tight text-muted">
+              {control === 'manual' ? (
+                <>
+                  <Keys>W A S D</Keys> or <Keys>arrows</Keys> to move, <Keys>shift</Keys> to
+                  go faster.
+                </>
+              ) : (
+                <>
+                  Walking the block on its own. Press <Keys>W A S D</Keys> or an{' '}
+                  <Keys>arrow</Keys> to take over.
+                </>
+              )}
+            </p>
+            <button
+              type="button"
+              onClick={() => onControl(control === 'manual' ? 'auto' : 'manual')}
+              className="shrink-0 rounded-lg border border-line px-2.5 py-1.5 text-xs font-semibold text-muted active:bg-panel-2"
+            >
+              {control === 'manual' ? 'Auto walk' : 'Drive'}
+            </button>
+          </div>
+        </div>
       )}
       {!online && (
-        <p className="pointer-events-auto rounded-xl border border-watch/40 bg-bg/92 px-3 py-2 text-xs leading-relaxed text-watch backdrop-blur">
+        <p className="pointer-events-auto rounded-xl border border-watch/40 bg-bg px-3 py-2 text-xs leading-relaxed text-watch">
           No signal. Keep working — every tap is saved with the time you made it and sent
           automatically when you are back in range.
         </p>
@@ -291,7 +311,7 @@ function DoorSheet({
   return (
     <section
       aria-label={`Record a status for ${address.address}`}
-      className="absolute inset-x-0 bottom-0 z-30 max-h-[85dvh] overflow-y-auto rounded-t-3xl border-t border-line bg-bg/97 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur"
+      className="absolute inset-x-0 bottom-0 z-30 max-h-[85dvh] overflow-y-auto rounded-t-3xl border-t border-line bg-bg pb-[max(0.75rem,env(safe-area-inset-bottom))]"
     >
       <div className="px-4 pt-3">
         <div aria-hidden className="mx-auto mb-3 h-1.5 w-12 rounded-full bg-line" />
@@ -425,5 +445,14 @@ function DoorSheet({
         </button>
       </div>
     </section>
+  );
+}
+
+/** A keycap, so the hint reads as keys rather than prose. */
+function Keys({ children }: { children: React.ReactNode }) {
+  return (
+    <kbd className="rounded border border-line bg-panel-2 px-1 py-0.5 font-mono text-[10px] font-semibold text-text">
+      {children}
+    </kbd>
   );
 }

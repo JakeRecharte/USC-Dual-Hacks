@@ -174,3 +174,81 @@ telephony server's `/events` feed. One row per Retell `call_id`, upserted as the
 Queue order: `callback_queue` > `human_now` > `priority_queue` > `abandoned_callback` >
 `scheduled_followup` / `answered_by_agent`; in-progress (null routing) wherever the board likes.
 Rows with `simulated=true` came from the simulator or the eval harness, not a real phone.
+
+## 7. Map placement and the decision record (`docs/sql/calls_map.sql`)
+
+| Column | Meaning |
+|---|---|
+| `lat`, `lng` | Where the call belongs on the map. Set at `lookup_address`. |
+| `geo_precision` | `house`: the household's own point, and `address_id` links to it. `street`: a house not in our records, placed at the centre of the known houses on that street. null: unplaceable. |
+| `decision_trace` | The routing decision as data (below). Rewritten at each `log_call`; the last one is the decision that stands. |
+
+```json
+{
+  "version": 1,
+  "at": "2026-10-17T20:14:03.000Z",
+  "facts": {
+    "mode": "wildfire", "found": true, "name_match": true,
+    "status": "refused", "source": "officer", "record_age_min": 25, "fresh_limit_min": 120,
+    "inside_perimeter": true, "with_them_now": false, "emergency": false,
+    "caller_state": "worried", "reported_status": null, "reported_by": null, "prior_callers": 1,
+    "routine": { "silence": 4, "vulnerable": 2, "flags": 1, "score": 5 }
+  },
+  "steps": [
+    { "rule": "refused",        "routing": "priority_queue", "severity": 4, "reason": "refused, note: …" },
+    { "rule": "repeat_callers", "routing": "priority_queue", "severity": 5, "reason": "…; 2 separate callers about this address" }
+  ]
+}
+```
+
+`facts.routine` only appears in routine mode. `facts.status` is null unless the caller named the
+resident (the same gate as the spoken answer). Rules, in evaluation order: `caller_panicked`,
+`with_them_now`, `emergency`, `resident_staying`, `resident_staying_outside`, `resident_out`,
+`resident_out_conflict`, `caller_report`, `refused`, `fresh_record`, `stale_record`,
+`inside_unresolved`, `not_in_records`, `routine_high`, `routine_low`, `default_escalate`; then
+adjustments `caller_distressed`, `repeat_callers`. The last step is the routing that stands.
+
+## 8. Dispatch dashboard: `calls.reasoning` and `calls.suggestions` (`docs/sql/houses.sql`)
+
+Written by the server at `log_call` (and `suggestions` again for hang-ups and failed transfers).
+Deterministic: built from `decision_trace`, the household record and the street's fire threat.
+
+`reasoning`: the decision as steps, in order:
+
+```json
+[
+  { "kind": "heard",   "text": "Asked about Harold Kim at 1515 Via de la Paz" },
+  { "kind": "record",  "text": "Record: refused (officer), 25 min ago" },
+  { "kind": "area",    "text": "Inside the evacuation area" },
+  { "kind": "caller",  "text": "caller worried; 1 earlier caller about this house" },
+  { "kind": "rule",    "rule": "refused",        "text": "People at this house chose to stay → queued for a person" },
+  { "kind": "adjust",  "rule": "repeat_callers", "text": "Other people already called about this house → moved up" },
+  { "kind": "outcome", "text": "Priority queue, severity 5" }
+]
+```
+Kinds: `heard`, `record`, `area`, `caller`, `score` (routine only), `rule` (exactly one), `adjust` (0+), `outcome` (last).
+
+`suggestions`: what to send, most urgent first. **Every one needs a dispatcher to confirm; nothing is dispatched automatically.**
+
+```json
+[
+  { "id": "recontact", "resource": "Patrol or engine to re-contact the occupants", "priority": "now",
+    "why": ["people at this house are staying", "officer note: \"2 adults staying, 1 on oxygen\"", "fire threat on this street: extreme"],
+    "requires_confirmation": true }
+]
+```
+`priority`: `now` | `soon` | `when_free` | `none`. The `none` suggestion ("No unit needed", answered from the record)
+marks a trip avoided. Ids: `als`, `rescue`, `police`, `recontact`, `medical_standby`, `accessible_vehicle`,
+`door_knock`, `recheck`, `welfare_check`, `followup_call`, `callback`, `none`.
+
+## 9. `houses`: current state of every household (`docs/sql/houses.sql`)
+
+One row per `addresses.id`, maintained by database triggers. Read it; never write it from the board.
+
+| Column | Meaning |
+|---|---|
+| `id`, `address`, `zone_id` | the household |
+| `evacuation_status`, `evacuation_status_source`, `evacuation_note`, `last_checked_at` | the newest `status_log` row; `last_checked_at` null = never checked |
+| `fire_threat_level` (`extreme`/`high`/`moderate`/`low`/null), `fire_threat_reason`, `fire_threat_source` | per street, from `docs/research/street-threat.json` via `npm run apply-threat` |
+| `called_about`, `call_count`, `last_called_at` | calls to the line linked to this household |
+| `updated_at` | last refresh |
