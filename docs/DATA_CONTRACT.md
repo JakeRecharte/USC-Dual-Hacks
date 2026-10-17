@@ -174,3 +174,36 @@ telephony server's `/events` feed. One row per Retell `call_id`, upserted as the
 Queue order: `callback_queue` > `human_now` > `priority_queue` > `abandoned_callback` >
 `scheduled_followup` / `answered_by_agent`; in-progress (null routing) wherever the board likes.
 Rows with `simulated=true` came from the simulator or the eval harness, not a real phone.
+
+## 7. Map placement and the decision record (`docs/sql/calls_map.sql`)
+
+| Column | Meaning |
+|---|---|
+| `lat`, `lng` | Where the call belongs on the map. Set at `lookup_address`. |
+| `geo_precision` | `house`: the household's own point, and `address_id` links to it. `street`: a house not in our records, placed at the centre of the known houses on that street. null: unplaceable. |
+| `decision_trace` | The routing decision as data (below). Rewritten at each `log_call`; the last one is the decision that stands. |
+
+```json
+{
+  "version": 1,
+  "at": "2026-10-17T20:14:03.000Z",
+  "facts": {
+    "mode": "wildfire", "found": true, "name_match": true,
+    "status": "refused", "source": "officer", "record_age_min": 25, "fresh_limit_min": 120,
+    "inside_perimeter": true, "with_them_now": false, "emergency": false,
+    "caller_state": "worried", "reported_status": null, "reported_by": null, "prior_callers": 1,
+    "routine": { "silence": 4, "vulnerable": 2, "flags": 1, "score": 5 }
+  },
+  "steps": [
+    { "rule": "refused",        "routing": "priority_queue", "severity": 4, "reason": "refused, note: …" },
+    { "rule": "repeat_callers", "routing": "priority_queue", "severity": 5, "reason": "…; 2 separate callers about this address" }
+  ]
+}
+```
+
+`facts.routine` only appears in routine mode. `facts.status` is null unless the caller named the
+resident (the same gate as the spoken answer). Rules, in evaluation order: `caller_panicked`,
+`with_them_now`, `emergency`, `resident_staying`, `resident_staying_outside`, `resident_out`,
+`resident_out_conflict`, `caller_report`, `refused`, `fresh_record`, `stale_record`,
+`inside_unresolved`, `not_in_records`, `routine_high`, `routine_low`, `default_escalate`; then
+adjustments `caller_distressed`, `repeat_callers`. The last step is the routing that stands.

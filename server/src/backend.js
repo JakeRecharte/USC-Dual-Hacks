@@ -149,24 +149,41 @@ const NOT_FOUND = { found: false, address_id: null, name_match: false, status: n
 // A house we don't have, on a street we do: it's in the same area. (A real call: "861 Alma
 // Real Drive" isn't seeded, 124 and 760 are, so it read as "area unknown" and was treated
 // as a routine check during an evacuation.) True/false only if every known house agrees.
-function streetArea(rows, address) {
+export function sameStreet(rows, address) {
   const key = addressKey(address);
-  if (!key) return null;
+  if (!key) return [];
   const street = key.split(' ').slice(1).join(' ');
-  const same = rows.filter((r) => similarity(street, addressKey(r.address)?.split(' ').slice(1).join(' ') ?? '') >= 0.85);
+  return rows.filter((r) => similarity(street, addressKey(r.address)?.split(' ').slice(1).join(' ') ?? '') >= 0.85);
+}
+function streetArea(same) {
   if (!same.length) return null;
   if (same.every((r) => r.inside_perimeter)) return true;
   if (same.every((r) => !r.inside_perimeter)) return false;
   return null;
 }
-const notFound = (rows, address) => ({ ...NOT_FOUND, inside_perimeter: streetArea(rows, address) });
+export function streetGeo(same) {
+  const placed = same.filter((r) => r.lat != null && r.lng != null);
+  if (!placed.length) return null;
+  const avg = (k) => placed.reduce((a, r) => a + Number(r[k]), 0) / placed.length;
+  return { lat: avg('lat'), lng: avg('lng'), precision: 'street' };
+}
+const notFound = (rows, address) => {
+  const same = sameStreet(rows, address);
+  return { ...NOT_FOUND, inside_perimeter: streetArea(same), _geo: streetGeo(same) };
+};
 
 // The looting safeguard lives here, in one place for both data sources: nothing about the
 // person (status, time, note, source) unless the caller named them. `structure` is never
 // read, so the agent can't say "the house burned down" (FRONTEND_CONTRACT.md §1).
+// Where to put the call on the map. Server-side only: index.js strips it before replying to
+// the agent. 'house' = the household's own point; 'street' = the centre of the known houses on
+// that street (a house we don't have); none = we can't place it.
+const geoOf = (row) => (row?.lat != null && row?.lng != null ? { lat: Number(row.lat), lng: Number(row.lng), precision: 'house' } : null);
+
 function answer(row, latest, subject_name) {
   const match = nameMatches(row.resident_name, subject_name);
   return {
+    _geo: geoOf(row),
     found: true,
     address_id: row.id,
     name_match: match,
@@ -302,10 +319,13 @@ const BASE_COLUMNS = ['call_id', 'mode', 'address', 'address_id', 'subject_name'
 const RETELL_COLUMNS = ['status', 'direction', 'started_at', 'ended_at', 'duration_s', 'disconnection_reason',
   'transfer_status', 'bypass', 'bypass_reason', 'distress_score', 'lookup_found', 'lookup_status', 'name_match',
   'inside_perimeter', 'report_written', 'transcript', 'summary', 'user_sentiment', 'recording_url', 'latency_ms'];
-// Until calls_retell.sql has run, write only the original columns rather than failing every write.
-// Re-checked every minute, so running the migration takes effect without a redeploy.
-let retellColumns = true;
-let retellCheckedAt = 0;
+const MAP_COLUMNS = ['lat', 'lng', 'geo_precision', 'decision_trace'];
+// Newest migration first: calls_map.sql adds MAP_COLUMNS, calls_retell.sql RETELL_COLUMNS. If a
+// group's columns are missing, drop just that group and keep writing the rest; re-checked every
+// minute, so running the migration takes effect without a redeploy.
+const GROUPS = [BASE_COLUMNS, RETELL_COLUMNS, MAP_COLUMNS];
+let level = GROUPS.length;
+let levelCheckedAt = 0;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function rowForDb(row, columns) {
@@ -317,22 +337,23 @@ function rowForDb(row, columns) {
 
 function persist(row) {
   if (!db) return;
-  if (!retellColumns && Date.now() - retellCheckedAt > 60_000) retellColumns = true;
-  // Old schema has routing NOT NULL: an in-progress call waits until it's routed.
-  if (!retellColumns && row.routing == null) return;
-  const write = () => db.from('calls').upsert(rowForDb(row, retellColumns ? [...BASE_COLUMNS, ...RETELL_COLUMNS] : BASE_COLUMNS), { onConflict: 'call_id' });
-  write().then(({ error }) => {
+  if (level < GROUPS.length && Date.now() - levelCheckedAt > 60_000) level = GROUPS.length;
+  // Before calls_retell.sql, routing is NOT NULL: an in-progress call waits until it's routed.
+  if (level < 2 && row.routing == null) return;
+  const attempt = () => db.from('calls').upsert(rowForDb(row, GROUPS.slice(0, level).flat()), { onConflict: 'call_id' });
+  const handle = ({ error }) => {
     if (!error) return;
-    if (retellColumns && (error.code === 'PGRST204' || /column/i.test(error.message))) {
-      retellColumns = false;
-      retellCheckedAt = Date.now();
-      dbFailed('calls upsert', `${error.message}: run docs/sql/calls_retell.sql; writing base columns until then`);
-      // Rows still in progress aren't written on the old schema (routing was not null there).
-      if (row.routing != null) write().then(({ error: e }) => e && dbFailed('calls upsert', e));
+    if (level > 1 && (error.code === 'PGRST204' || /column/i.test(error.message))) {
+      level -= 1;
+      levelCheckedAt = Date.now();
+      dbFailed('calls upsert', `${error.message}: run ${level === 2 ? 'docs/sql/calls_map.sql' : 'docs/sql/calls_retell.sql'}; writing older columns until then`);
+      if (level < 2 && row.routing == null) return;
+      attempt().then(handle, (err) => dbFailed('calls upsert', err));
       return;
     }
     dbFailed('calls upsert', error);
-  }, (err) => dbFailed('calls upsert', err));
+  };
+  attempt().then(handle, (err) => dbFailed('calls upsert', err));
 }
 
 // Any part of a call's row, as it happens (call started, lookup, transcript, transfer, analysis).
@@ -357,7 +378,7 @@ function priorCallers(payload, address_id) {
 export async function logCall(payload, now) {
   const lookup = await lookupAddress(payload, now);
   const prior_callers = priorCallers(payload, lookup.address_id);
-  const decision = route({ ...payload, prior_callers }, lookup, now);
+  const { trace, ...decision } = route({ ...payload, prior_callers }, lookup, now);
 
   // What the caller told us goes back into the sweep log, if it's allowed to (reports.js).
   let report_written = null;
@@ -371,7 +392,9 @@ export async function logCall(payload, now) {
     }
   }
 
-  const row = upsertRow(payload.call_id, { ...payload, address_id: lookup.address_id, prior_callers, report_written, ...decision }, now);
+  const geo = lookup._geo;
+  const row = upsertRow(payload.call_id, { ...payload, address_id: lookup.address_id, prior_callers, report_written, ...decision,
+    decision_trace: trace, ...(geo ? { lat: geo.lat, lng: geo.lng, geo_precision: geo.precision } : {}) }, now);
   return { row, lookup };
 }
 

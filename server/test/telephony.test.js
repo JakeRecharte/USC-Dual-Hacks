@@ -5,7 +5,7 @@ if (process.env.SUPABASE_URL) throw new Error('tests must not run against Supaba
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { checkBypass, callerText } from '../src/bypass.js';
-import { lookupAddress, logCall, logUnrouted, logTransferFailed, getCall, addressKey, nameMatches, spokenNumber } from '../src/backend.js';
+import { lookupAddress, logCall, logUnrouted, logTransferFailed, getCall, addressKey, nameMatches, spokenNumber, sameStreet, streetGeo } from '../src/backend.js';
 import { route, routineScore, FRESH_MIN } from '../src/routing.js';
 import { sayForLookup, sayForRouting } from '../src/speech.js';
 import { scoreDistress, handoffInstruction } from '../src/distress.js';
@@ -420,4 +420,40 @@ test('an address not in our records never gets a follow-up or an agent-only answ
     last_contact_hours: 0.67, red_flags: {}, call_id: 'nf2', from_number: '+1310555901' });
   assert.equal(inArea.routing, 'priority_queue');
   assert.equal(inArea.severity, 4);
+});
+
+// ── Decision trace and map placement (calls.decision_trace, calls.lat/lng/geo_precision) ──
+
+test('every routing decision records the facts it saw and the rules that decided, in order', async () => {
+  const lookup = await lookupAddress({ address: '1515 Via de la Paz', subject_name: 'Harold Kim' }, now);
+  const d = route({ mode: 'wildfire', caller_state: 'worried', prior_callers: 1 }, lookup, now);
+  assert.deepEqual(d.trace.steps.map((x) => x.rule), ['refused', 'repeat_callers']);
+  assert.equal(d.trace.steps.at(-1).routing, d.routing);
+  assert.equal(d.trace.facts.status, 'refused');
+  assert.equal(d.trace.facts.inside_perimeter, true);
+  assert.equal(d.trace.facts.prior_callers, 1);
+});
+
+test('the trace never carries a status the caller was not allowed to hear', async () => {
+  const lookup = await lookupAddress({ address: '1515 Via de la Paz', subject_name: 'John Smith' }, now);
+  const d = route({ mode: 'wildfire' }, lookup, now);
+  assert.equal(d.trace.facts.status, null);
+  assert.equal(d.trace.facts.name_match, false);
+});
+
+test('routine decisions show their score parts', () => {
+  const d = route({ mode: 'routine', last_contact_hours: 336, vulnerability: { age: 84, lives_alone: true }, red_flags: { mail_piling: true } },
+    { found: true, name_match: true, status: 'unknown', inside_perimeter: false }, now);
+  assert.deepEqual(d.trace.facts.routine, { silence: 4, vulnerable: 2, flags: 1, score: 5 });
+  assert.equal(d.trace.steps[0].rule, 'routine_high');
+});
+
+test('a house we do not have is placed at the centre of its street', () => {
+  const rows = [{ address: '124 Alma Real Dr', lat: 34.04, lng: -118.52, inside_perimeter: true },
+    { address: '760 Alma Real Dr', lat: 34.06, lng: -118.54, inside_perimeter: true },
+    { address: '1 Other St', lat: 0, lng: 0, inside_perimeter: false }];
+  const g = streetGeo(sameStreet(rows, '861 Alma Real Drive'));
+  assert.equal(g.precision, 'street');
+  assert.ok(Math.abs(g.lat - 34.05) < 1e-9 && Math.abs(g.lng + 118.53) < 1e-9);
+  assert.equal(streetGeo(sameStreet(rows, '9 Nowhere Ln')), null);
 });

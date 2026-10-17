@@ -70,7 +70,7 @@ function noteCallerState(callId, state, source) {
 app.post('/fn/lookup_address', { preHandler: verifyRetell }, async (req, reply) => {
   const { call, args } = argsOf(req.body);
   const now = Date.now();
-  const lookup = await backend.lookupAddress(args, now);
+  const { _geo: geo, ...lookup } = await backend.lookupAddress(args, now);
   const say = sayForLookup(lookup, args.subject_name, now, FRESH_MIN);
 
   // Answer first: the caller is listening to silence until this returns.
@@ -82,6 +82,7 @@ app.post('/fn/lookup_address', { preHandler: verifyRetell }, async (req, reply) 
       address: args.address, subject_name: args.subject_name, address_id: lookup.address_id,
       lookup_found: lookup.found, lookup_status: lookup.status, name_match: lookup.name_match,
       inside_perimeter: lookup.inside_perimeter, from_number: call.from_number, simulated: Boolean(call.simulated),
+      ...(geo ? { lat: geo.lat, lng: geo.lng, geo_precision: geo.precision } : {}),
     });
     noteCallerState(call.call_id, args.caller_state, 'agent');
     sessions.bus.emit('lookup', { call_id: call.call_id, address: args.address, subject_name: args.subject_name, ...lookup, now });
