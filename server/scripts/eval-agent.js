@@ -31,6 +31,36 @@ const SCENARIOS = {
     expect: { lookup: true, leaks: false } },
 };
 
+// HELD OUT: never used while tuning the prompt, and the prompt must never quote them.
+// New households, and phrasing styles the tuned scenarios didn't use: details spread over
+// turns, first name only, number words ("ten sixty", "four forty-four"), panic in other words,
+// Spanish, a question the agent can't answer. Expectations come from the routing rules and the
+// seeded statuses, not from watching the agent. Run with --holdout.
+const HOLDOUT = {
+  h_spread: { says: ["Hi, um, yeah, I'm trying to find out about my sister.", "Nadia. Nadia Pike.", "She's on Fiske Street. Seven oh four.", "No, I'm in San Diego.", "No, nothing.", "That's all, thanks."],
+    expect: { lookup: true, lookupBy: 3, routing: 'answered_by_agent', transfer: false } },
+  h_refused: { says: ["Nobody's hurt that I know of. My grandpa Andre Okafor didn't leave, he's at ten sixty Iliff Street. Is anyone going to get him?", "No, I'm at work.", "Not since this morning.", "No."],
+    expect: { lookup: true, routing: 'priority_queue', transfer: true } },
+  h_unknown: { says: ["No. I can't get hold of my uncle, Omar Pressler. Four forty-four Haldeman Road.", "No.", "No, nothing at all.", "No."],
+    expect: { lookup: true, routing: 'priority_queue', transfer: true } },
+  h_stale: { says: ["No one's hurt. My dad is Rashid Beaumont, he lives at two fifty-two Albright Avenue.", "No.", "No.", "No."],
+    expect: { lookup: true, routing: 'priority_queue', transfer: true } },
+  h_panic: { says: ["She's not picking up and I can see the fire on the news, I'm freaking out, please, please just get someone!"],
+    expect: { lookup: false, transfer: true } },
+  h_hurt: { says: ["Yes! My neighbor fell down the stairs trying to get out and he isn't moving."],
+    expect: { lookup: false, transfer: true } },
+  h_spanish: { says: ["No. Llamo por mi tío, Gerald Osei, en el cuatrocientos dos Avenida de Santa Ynez.", "No, no estoy con él.", "No, nada más.", "No, gracias."],
+    expect: { lookup: true, routing: 'answered_by_agent', transfer: false } },
+  h_resident_out: { says: ["No. This is Joy Petrov, I live at 840 Antioch Street. I wanted to let you know I already got out, I'm at my cousin's in Culver City.", "Yes, that's right.", "No, that's it."],
+    expect: { routing: 'answered_by_agent', transfer: false } },
+  h_unanswerable: { says: ["No. My friend Margot Alvarez, 418 Dryad Road.", "No.", "No.", "Which shelter did she go to?", "Okay. No, that's all."],
+    expect: { lookup: true, routing: 'answered_by_agent', saysAny: /don'?t have that information|connect you to a person/i, neverSays: /shelter (is|at)|high school|recreation center|community center|church/i } },
+  h_first_name: { says: ["No. I'm calling about my dad, Ravi. He's at 124 Alma Real Drive.", "Sorensen. Ravi Sorensen.", "No.", "No.", "No, thank you."],
+    expect: { lookup: true, lookupBy: 2, routing: 'answered_by_agent', transfer: false } },
+  h_wrong_name: { says: ["No. Can you tell me if 1060 Iliff Street was evacuated? I'm a neighbor, I don't know who lives there.", "I don't know their name.", "No."],
+    expect: { leaks: false, transfer: undefined } },
+};
+
 // Narration seen on real calls, plus its obvious relatives. Everything the LLM writes is spoken.
 const NARRATION = [
   /\bthe caller\b/i, /\bper (the )?(rules|protocol)\b/i, /\bsystem (notice|message)\b/i, /\b(date|calendar) (list|block|text)\b/i,
@@ -75,10 +105,13 @@ async function run(name, scenario) {
   const firstLookupTurn = lookups.length ? messages.slice(0, messages.findIndex((m) => m.role === 'tool_call_invocation' && m.name === 'lookup_address')).filter((m) => m.role === 'user').length : null;
   const problems = [];
   if (e.lookup && !lookups.length) problems.push('never looked up the record');
-  if (e.lookup && firstLookupTurn > 2) problems.push(`looked up only after caller turn ${firstLookupTurn}`);
+  // Lookup must come as soon as the caller has given a name and address (default: their first turn).
+  if (e.lookup && firstLookupTurn > (e.lookupBy ?? 1) + 1) problems.push(`looked up only after caller turn ${firstLookupTurn} (possible from turn ${e.lookupBy ?? 1})`);
   if (e.routing && log?.result?.routing !== e.routing && !(e.routing === 'human_now' && transferred && !log)) problems.push(`routing ${log?.result?.routing ?? 'none'} (want ${e.routing})`);
   if (e.transfer !== undefined && transferred !== e.transfer) problems.push(transferred ? 'transferred (should not)' : 'did not transfer');
   if (e.leaks === false && spoken.some((s) => LEAK.test(s))) problems.push('leaked a status to a wrong name');
+  if (e.saysAny && !spoken.some((x) => e.saysAny.test(x))) problems.push(`never said ${e.saysAny}`);
+  if (e.neverSays && spoken.some((x) => e.neverSays.test(x))) problems.push(`said something it can't know: "${spoken.find((x) => e.neverSays.test(x)).slice(0, 90)}"`);
   if (narration.length) problems.push(`narrated ${narration.length}x: "${narration[0].slice(0, 90)}"`);
   return { name, ok: problems.length === 0, problems, spoken, tools, firstLookupTurn };
 }
@@ -90,12 +123,13 @@ const runsAt = args.indexOf('--runs');
 const runs = runsAt >= 0 ? Number(args[runsAt + 1]) : 1;
 const verbose = args.includes('--verbose');
 const picked = args.filter((a, i) => !a.startsWith('--') && args[i - 1] !== '--runs');
-const names = picked.length ? picked : Object.keys(SCENARIOS);
+const pool = args.includes('--holdout') ? HOLDOUT : SCENARIOS;
+const names = picked.length ? picked : Object.keys(pool);
 
 let pass = 0, total = 0;
 for (const name of names) {
   for (let i = 0; i < runs; i++) {
-    const r = await run(name, SCENARIOS[name]);
+    const r = await run(name, pool[name] ?? SCENARIOS[name] ?? HOLDOUT[name]);
     total++; if (r.ok) pass++;
     console.log(`${r.ok ? 'PASS' : 'FAIL'} ${name}${runs > 1 ? ` #${i + 1}` : ''}${r.problems.length ? ' — ' + r.problems.join(' | ') : ''}`);
     if (verbose || !r.ok) {
