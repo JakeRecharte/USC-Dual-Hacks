@@ -49,8 +49,9 @@ async function tools(base) {
 async function findAgent(name) {
   const res = await retell.agent.list({ limit: 1000 });
   const items = Array.isArray(res) ? res : res.items || [];
-  // list returns every version; any one carries the agent_id and its llm_id
-  return items.find((a) => a.agent_name === name);
+  // list items are summaries without response_engine; fetch the full agent
+  const hit = items.find((a) => a.agent_name === name);
+  return hit ? retell.agent.retrieve(hit.agent_id) : null;
 }
 
 async function upsertAgent({ name, prompt, toolList, beginMessage, startSpeaker, base }) {
@@ -75,6 +76,8 @@ async function upsertAgent({ name, prompt, toolList, beginMessage, startSpeaker,
   const existing = await findAgent(name);
   if (existing) {
     const llmId = existing.response_engine.llm_id;
+    // keep a voice picked in the dashboard unless RETELL_VOICE_ID overrides it
+    if (!process.env.RETELL_VOICE_ID) agentBody.voice_id = existing.voice_id;
     await retell.llm.update(llmId, llmBody);
     await retell.agent.update(existing.agent_id, agentBody);
     console.log(`updated ${name}: ${existing.agent_id}`);
