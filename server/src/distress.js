@@ -70,7 +70,8 @@ export function scoreDistress(call, cfg = DISTRESS) {
 }
 
 // What the server injects into the live call when distress fires.
-// The reasons are for the agent only; it must not say them aloud.
+// Injected into the live call (updateLive). Worded as a plain instruction, not a "notice":
+// framing it as a system message made the agent comment on injected context out loud.
 export const handoffInstruction = (reasons) =>
-  `SYSTEM NOTICE, do not read aloud: caller distress detected (${reasons.join('; ')}). ` +
-  'Say nothing. Immediately call request_human with reason "distress", then call transfer_to_human.';
+  `The caller needs a person now (${reasons.join('; ')}). Say nothing about this. ` +
+  'Call request_human with reason "distress", then call transfer_to_human.';

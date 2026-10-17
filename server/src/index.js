@@ -46,6 +46,8 @@ async function verifyRetell(req, reply) {
 // Body is { name, call, args } (or args at root if args_at_root is on in Retell).
 const argsOf = (body) => {
   const { call = {}, args: nested, name, ...rest } = body;
+  // Retell's playground (eval harness) is never a real caller.
+  if (call.call_id === 'playground') call.simulated = true;
   return { call, args: nested || rest };
 };
 
@@ -208,6 +210,13 @@ app.post('/webhook/retell', { preHandler: verifyRetell }, async (req, reply) => 
     sessions.bus.emit(event, call);
     req.log.info({ event, call_id: call.call_id }, 'lifecycle');
   });
+});
+
+// Eval harness only: forget the shared "playground" call between scenarios. Signed like Retell.
+app.post('/dev/reset-playground', { preHandler: verifyRetell }, async () => {
+  sessions.remove('playground');
+  backend.forgetCall('playground');
+  return { ok: true };
 });
 
 // Read side for the console until Supabase Realtime is wired up. Read-only, so open CORS.

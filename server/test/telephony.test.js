@@ -380,3 +380,10 @@ test('fuzzy match is still name-gated and never jumps to a different house numbe
   const unrelated = await lookupAddress({ address: '1515 Main St', subject_name: 'John Smith' }, now);
   assert.equal(unrelated.found, false);
 });
+
+test('misheard house number: same street + the named resident finds the house; a wrong name does not', async () => {
+  const ruth = await lookupAddress({ address: '1680 Bollinger Drive', subject_name: 'Ruth Adams' }, now);
+  assert.equal(ruth.found, true);
+  assert.equal(ruth.address_id, '00000000-0000-4000-8000-000000000003');
+  assert.equal((await lookupAddress({ address: '1680 Bollinger Drive', subject_name: 'John Smith' }, now)).found, false);
+});

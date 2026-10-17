@@ -124,7 +124,13 @@ export function findHousehold(rows, address, subject_name) {
     .map((r) => ({ r, score: similarity(said.join(' '), addressKey(r.address).split(' ').slice(1).join(' ')) }))
     .filter((x) => x.score >= 0.75)
     .sort((a, b) => b.score - a.score);
-  return close.length === 1 || (close.length > 1 && close[0].score > close[1].score) ? close[0].r : null;
+  if (close.length === 1 || (close.length > 1 && close[0].score > close[1].score)) return close[0].r;
+  // Number misheard ("one six eight zero zero" → 1680 on a real call): the same street and
+  // the named resident. Needs the name, so it reveals nothing a wrong-name caller couldn't get.
+  const street = said.join(' ');
+  const byName = rows.filter((r) => nameMatches(r.resident_name, subject_name)
+    && similarity(street, addressKey(r.address).split(' ').slice(1).join(' ')) >= 0.75);
+  return byName.length === 1 ? byName[0] : null;
 }
 
 // The record's first name plus at least one other of its names. Accents, hyphens and
@@ -351,4 +357,11 @@ export function logTransferFailed(callId, fromNumber, detail, now) {
 }
 
 export const getCall = (callId) => calls.get(callId);
+
+// Retell's playground (scripts/eval-agent.js) sends every conversation as call_id "playground";
+// the harness forgets it between scenarios so one scenario's state can't leak into the next.
+export function forgetCall(callId) {
+  calls.delete(callId);
+  if (db) db.from('calls').delete().eq('call_id', callId).then(({ error }) => error && dbFailed('forget call', error), (err) => dbFailed('forget call', err));
+}
 export const allCalls = () => [...calls.values()];

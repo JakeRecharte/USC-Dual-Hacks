@@ -2,7 +2,7 @@
   {
     "type": "custom",
     "name": "lookup_address",
-    "description": "Look up the last recorded status of an address. Call once you have the person's full name and their address.",
+    "description": "Look up the last recorded status of an address. Call it as soon as you have the person's first and last name and the address, before asking anything else. Never say you are calling it.",
     "url": "{{PUBLIC_URL}}/fn/lookup_address",
     "speak_during_execution": false,
     "speak_after_execution": true,
@@ -39,7 +39,7 @@
   {
     "type": "custom",
     "name": "log_call",
-    "description": "Log the call and get the routing decision. Call after lookup_address, or immediately if the caller is with the person now.",
+    "description": "Log the call and get the routing decision. Call after lookup_address and the follow-up questions, or immediately if the caller is with the person now. Never say you are calling it.",
     "url": "{{PUBLIC_URL}}/fn/log_call",
     "speak_during_execution": false,
     "speak_after_execution": true,
