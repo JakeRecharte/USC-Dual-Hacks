@@ -1,6 +1,6 @@
 -- House colours decided by Supabase, from the record AND the Retell calls about each house,
 -- plus a house_events feed: "Retell registered 1515 Via de la Paz as RED". Run once in
--- Supabase → SQL Editor, after houses.sql. Safe to run twice.
+-- Supabase -> SQL Editor, after houses.sql. Safe to run twice.
 --
 --   red    marked staying (refused), or a call about it needed a person now
 --          (routing human_now / callback_queue, or emergency/distress heard live)
