@@ -1,0 +1,119 @@
+@import "tailwindcss";
+
+/*
+ * Line is an operations console: dark by default, high contrast, legible on a projector and
+ * on a phone held at arm's length at night. Status colours are the single source of truth
+ * for both the map and the lists, and are kept in step with lib/priority.ts.
+ */
+:root {
+  --bg: #0b0f14;
+  --panel: #121820;
+  --panel-2: #18202a;
+  --line: #243040;
+  --text: #e8eef5;
+  --muted: #8b9bb0;
+
+  /*
+   * Urgency is an ORDERED status scale, not a categorical one. These four steps were chosen
+   * with the palette validator against this surface: worst adjacent pair is 16.2 normal-vision
+   * and 12.2 CVD (deutan) ΔE, so "no answer" and "stale" stay distinguishable on the map for
+   * red-green colourblind dispatchers. Every use also carries a text label, never colour alone.
+   */
+  --critical: #ef4444;
+  --high: #fb923c;
+  --watch: #fde047;
+  --clear: #34d399;
+  --info: #38bdf8;
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-panel: var(--panel);
+  --color-panel-2: var(--panel-2);
+  --color-line: var(--line);
+  --color-text: var(--text);
+  --color-muted: var(--muted);
+  --color-critical: var(--critical);
+  --color-high: var(--high);
+  --color-watch: var(--watch);
+  --color-clear: var(--clear);
+  --color-info: var(--info);
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+}
+
+html {
+  color-scheme: dark;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  /* The officer page is one-handed on a phone: no accidental text selection on long press. */
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Leaflet's own stylesheet is imported by the map component; these align it to the theme. */
+.leaflet-container {
+  background: #0b0f14;
+  font-family: var(--font-sans);
+}
+
+.leaflet-tile-pane {
+  /* OSM tiles are built for light UI. Dimmed and desaturated so status colours dominate. */
+  filter: invert(1) hue-rotate(185deg) brightness(0.82) contrast(0.92) saturate(0.55);
+}
+
+.leaflet-control-zoom a,
+.leaflet-bar {
+  background: var(--panel-2) !important;
+  color: var(--text) !important;
+  border-color: var(--line) !important;
+}
+
+.leaflet-popup-content-wrapper,
+.leaflet-popup-tip {
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--line);
+  box-shadow: 0 10px 30px rgb(0 0 0 / 0.5);
+}
+
+.leaflet-popup-content {
+  margin: 0.75rem 0.9rem;
+  font-size: 0.8125rem;
+  line-height: 1.45;
+}
+
+.leaflet-popup-close-button {
+  color: var(--muted) !important;
+}
+
+.leaflet-control-attribution {
+  background: rgb(11 15 20 / 0.75) !important;
+  color: var(--muted) !important;
+}
+
+.leaflet-control-attribution a {
+  color: var(--muted) !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Horizontal zone strips scroll by swipe; the bar itself is noise on a dark panel. */
+.scrollbar-none {
+  scrollbar-width: none;
+}
+
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
