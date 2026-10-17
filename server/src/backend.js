@@ -185,6 +185,7 @@ function upsertRow(callId, patch, now) {
   if (!prev) {
     const row = { id: `call_${calls.size + 1}`, created_at: new Date(now).toISOString(), ...patch, call_id: callId };
     calls.set(callId, row);
+    persist(row);
     return row;
   }
   const keepRouting = (ROUTE_RANK[prev.routing] ?? 0) > (ROUTE_RANK[patch.routing] ?? 0);

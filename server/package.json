@@ -9,7 +9,8 @@
     "simulate": "node scripts/simulate.js",
     "setup-retell": "node scripts/setup-retell.js",
     "test": "node --test \"test/*.test.js\"",
-    "deploy": "cd .. && railway up --ci -p e4a0f795-23e0-45f4-bb91-54dfd4f40a73 -e production -s USC-Dual-Hacks -m \"$(git rev-parse --short HEAD)\""
+    "deploy": "cd .. && railway up --ci -p e4a0f795-23e0-45f4-bb91-54dfd4f40a73 -e production -s USC-Dual-Hacks -m \"$(git rev-parse --short HEAD)\"",
+    "reset-demo": "node scripts/reset-demo.js"
   },
   "keywords": [],
   "author": "",
