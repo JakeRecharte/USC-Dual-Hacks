@@ -138,7 +138,6 @@
     },
     "transfer_option": {
       "type": "warm_transfer",
-      "public_handoff_option": null,
       "private_handoff_option": {
         "type": "prompt",
         "prompt": "In one short sentence, tell the call-taker who the caller is asking about, the address if known, and why the call was transferred. Do not greet."
