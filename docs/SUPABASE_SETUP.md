@@ -119,14 +119,12 @@ relative to `now()`, so the ages re-base each time.
 delete from public.status_log;
 delete from public.addresses;
 
--- 79 households across 10 zones, generated from web/src/lib/addresses.ts.
+-- 77 households across 8 zones, generated from web/src/lib/addresses.ts.
 --   PAL-01  Castellammare & Sunset Mesa (10)
 --   PAL-05  Palisades Village (10)
 --   PAL-02  Marquez Knolls (9)
 --   PAL-03  Palisades Highlands (10)
 --   PAL-06  Huntington Palisades (10)
---   LAC-9  Crenshaw (outside) (1)
---   LAE-2  East Hollywood (outside) (1)
 --   PAL-04  Alphabet Streets (12)
 --   PAL-07  Rustic Canyon (7)
 --   PAL-08  Santa Monica Canyon & Riviera (9)
@@ -139,8 +137,6 @@ values
   ('00000000-0000-4000-8000-000000000003', '16800 Bollinger Dr', 34.0398, -118.5557, 'PAL-02', 'Ruth Adams', 'unassessed', null),
   ('00000000-0000-4000-8000-000000000004', '1100 Palisades Dr', 34.0607, -118.5437, 'PAL-03', 'Tom Becker', 'unassessed', null),
   ('00000000-0000-4000-8000-000000000005', '820 Chautauqua Blvd', 34.0332, -118.5213, 'PAL-06', 'Linda Park', 'unassessed', null),
-  ('00000000-0000-4000-8000-000000000006', '4512 Crenshaw Blvd', 34.0031, -118.3349, 'LAC-9', 'Dorothy Hayes', 'unassessed', null),
-  ('00000000-0000-4000-8000-000000000007', '910 N Vermont Ave', 34.0902, -118.2921, 'LAE-2', 'Kevin Nguyen', 'unassessed', null),
   ('00000000-0000-4000-8000-000000000008', '640 Toyopa Dr', 34.0401, -118.5232, 'PAL-06', 'Beatrice Lam', 'unassessed', null),
   ('00000000-0000-4000-8000-000000000009', '130 Castellammare Dr', 34.03946, -118.57844, 'PAL-01', 'Avery Mwangi', 'unassessed', null),
   ('00000000-0000-4000-8000-000000000010', '202 Posetano Rd', 34.03939, -118.57893, 'PAL-01', 'Sam Boyle', 'destroyed', now() - interval '92 minutes'),
@@ -279,7 +275,7 @@ values
   ('00000000-0000-4000-8000-000000000078', 'self_out', 'resident_reply', null, now() - interval '37 minutes'),
   ('00000000-0000-4000-8000-000000000079', 'in_transit', 'resident_reply', null, now() - interval '19 minutes');
 
--- 62 of 79 households have a recorded status; the rest read "unknown".
+-- 62 of 77 households have a recorded status; the rest read "unknown".
 ```
 
 After seeding, the dispatch board should read **40 unresolved of 77**, **4 refused**,
@@ -288,9 +284,13 @@ zone no crew has reached. If it doesn't, the seed didn't take.
 
 `inside_perimeter` is **not** a column. The contract keeps the perimeter as one polygon
 covering Pacific Palisades from the coast up into Santa Ynez Canyon, so the app computes it
-from `lat`/`lng` (`web/src/lib/geo.ts`). 77 of the 79 households fall inside; Crenshaw and
-Vermont are the two outside, and a unit test asserts the computed value matches the zone for
-every row.
+from `lat`/`lng` (`web/src/lib/geo.ts`).
+
+**The board is scoped to this one incident, and enforces it.** A household outside the
+perimeter is not hidden in the UI, it never enters: reads drop it, and a write against it is
+refused on both the Supabase and in-memory paths. So the table may hold the agent's
+out-of-area households — the agent still needs them — and the map stays Palisades-only. If
+you seed extra rows elsewhere in LA, expect the board to ignore them; that is deliberate.
 
 ## 4. Vercel configuration
 

@@ -60,6 +60,9 @@ export function joinRows(addresses: AddressRowDb[], statuses: StatusRowDb[]): Ad
 
   return addresses
     .filter((a) => a.lat != null && a.lng != null)
+    // This board covers one incident. A household outside the perimeter is not filtered in
+    // the UI, it never enters: whatever else the table holds, the map cannot show it.
+    .filter((a) => pointInPolygon([Number(a.lat), Number(a.lng)], PERIMETER))
     .map((a) => {
       const latest = newest.get(a.id);
       return {
@@ -69,7 +72,7 @@ export function joinRows(addresses: AddressRowDb[], statuses: StatusRowDb[]): Ad
         lng: Number(a.lng),
         zone_id: a.zone_id ?? 'unzoned',
         resident_name: a.resident_name ?? '',
-        inside_perimeter: pointInPolygon([Number(a.lat), Number(a.lng)], PERIMETER),
+        inside_perimeter: true,
         status: latest ? asStatus(latest.status) : 'unknown',
         source: latest ? asSource(latest.source) : null,
         recorded_at: latest?.recorded_at ?? null,
@@ -125,6 +128,21 @@ export async function writeStatus(
   update: StatusWrite,
 ): Promise<{ ok: true } | { ok: false; reason: string }> {
   const recordedAt = update.recorded_at ?? new Date().toISOString();
+
+  // One read before any write: a status may only be recorded against a household inside the
+  // perimeter. The officer page cannot offer anything else, so reaching this means a direct
+  // call to the API, and the board is not the place to record it.
+  const target = await client
+    .from('addresses')
+    .select('lat, lng')
+    .eq('id', update.address_id)
+    .maybeSingle();
+  if (target.error) return { ok: false, reason: `address lookup: ${target.error.message}` };
+  if (!target.data) return { ok: false, reason: 'address not on record' };
+  const { lat, lng } = target.data as { lat: number | null; lng: number | null };
+  if (lat == null || lng == null || !pointInPolygon([Number(lat), Number(lng)], PERIMETER)) {
+    return { ok: false, reason: 'address is outside the incident perimeter' };
+  }
 
   if (update.status) {
     const { error } = await client.from('status_log').insert({

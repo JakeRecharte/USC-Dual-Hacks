@@ -28,6 +28,89 @@ const PAPER = '#f4efe6';
 const CONTEXT = '#7d8a96';
 const LABELS = 'basemap-labels';
 
+/**
+ * The frame is locked to Pacific Palisades. This board covers one incident, so panning off
+ * to Burbank or zooming out to the whole county is never useful and only invites the map to
+ * be read as more than it is. Derived from the perimeter with a margin, not a guessed box.
+ */
+const FRAME_MARGIN = { lat: 0.013, lng: 0.016 };
+
+function lockedBounds(): [[number, number], [number, number]] {
+  const lats = PERIMETER.map((p) => p[0]);
+  const lngs = PERIMETER.map((p) => p[1]);
+  return [
+    [Math.min(...lngs) - FRAME_MARGIN.lng, Math.min(...lats) - FRAME_MARGIN.lat],
+    [Math.max(...lngs) + FRAME_MARGIN.lng, Math.max(...lats) + FRAME_MARGIN.lat],
+  ];
+}
+
+/** Below this the region stops filling the frame; above it, overzoomed tiles go soft. */
+const MIN_ZOOM = 12;
+const MAX_ZOOM = 18;
+
+/** The vector source's own top zoom. Past it MapLibre overzooms the z14 tiles. */
+const SOURCE_MAX_ZOOM = 14;
+
+const TILEJSON_URL = 'https://tiles.openfreemap.org/planet';
+
+const lngToTileX = (lng: number, z: number) => Math.floor(((lng + 180) / 360) * 2 ** z);
+
+const latToTileY = (lat: number, z: number) => {
+  const r = (lat * Math.PI) / 180;
+  return Math.floor(((1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2) * 2 ** z);
+};
+
+/**
+ * Pull every basemap tile the locked frame can ever show into the browser's HTTP cache.
+ *
+ * Because the view cannot leave Pacific Palisades, that whole set is about 54 tiles across
+ * z12–14 — small enough to fetch once up front. Without this, zooming out requests a ring of
+ * cold tiles at the edges and they arrive late; with it they are already on disk, so the
+ * edges are there as soon as they are drawn.
+ *
+ * Fire-and-forget: a failure here costs nothing, since MapLibre fetches tiles itself anyway.
+ */
+async function warmTiles(bounds: [[number, number], [number, number]], signal: AbortSignal) {
+  let template: string | undefined;
+  try {
+    const res = await fetch(TILEJSON_URL, { signal });
+    template = ((await res.json()) as { tiles?: string[] }).tiles?.[0];
+  } catch {
+    return;
+  }
+  if (!template) return;
+
+  const [[west, south], [east, north]] = bounds;
+  const urls: string[] = [];
+  for (let z = Math.floor(MIN_ZOOM); z <= SOURCE_MAX_ZOOM; z += 1) {
+    for (let x = lngToTileX(west, z); x <= lngToTileX(east, z); x += 1) {
+      for (let y = latToTileY(north, z); y <= latToTileY(south, z); y += 1) {
+        urls.push(template.replace('{z}', String(z)).replace('{x}', String(x)).replace('{y}', String(y)));
+      }
+    }
+  }
+
+  // Six at a time: enough to finish quickly, few enough to leave the visible tiles priority.
+  const queue = urls.values();
+  const worker = async () => {
+    for (const url of queue) {
+      if (signal.aborted) return;
+      try {
+        await fetch(url, { signal, cache: 'force-cache', mode: 'cors' });
+      } catch {
+        /* One cold tile is not worth failing over. */
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: 6 }, worker));
+}
+
+/**
+ * The basemap carries real detail — landcover, building footprints, the full road network
+ * and street names — because an officer reads this to find a house, not to admire it. The
+ * vector source tops out at z14 and MapLibre overzooms past that, which stays sharp since
+ * the geometry is scaled rather than resampled.
+ */
 const BASE_STYLE: StyleSpecification = {
   version: 8,
   glyphs: 'https://tiles.openfreemap.org/fonts/{fontstack}/{range}.pbf',
@@ -41,23 +124,62 @@ const BASE_STYLE: StyleSpecification = {
   },
   layers: [
     { id: 'bg', type: 'background', paint: { 'background-color': '#f1ece2' } },
+
+    // Hillside and canyon vegetation: most of what burns here, and what makes the
+    // Highlands and Rustic Canyon read as terrain rather than blank paper.
+    { id: 'landcover', type: 'fill', source: 'basemap', 'source-layer': 'landcover',
+      filter: ['in', ['get', 'class'], ['literal', ['wood', 'grass', 'scrub', 'forest']]],
+      paint: { 'fill-color': '#e6e6d2', 'fill-opacity': 0.75 } },
+    { id: 'landuse-residential', type: 'fill', source: 'basemap', 'source-layer': 'landuse',
+      filter: ['in', ['get', 'class'], ['literal', ['residential', 'suburb', 'neighbourhood']]],
+      paint: { 'fill-color': '#efe9dd', 'fill-opacity': 0.7 } },
     { id: 'park', type: 'fill', source: 'basemap', 'source-layer': 'park',
-      paint: { 'fill-color': '#e3e3cf', 'fill-opacity': 0.8 } },
+      paint: { 'fill-color': '#dfe3cc', 'fill-opacity': 0.8 } },
     { id: 'water', type: 'fill', source: 'basemap', 'source-layer': 'water',
       paint: { 'fill-color': '#cfd8d5' } },
+    { id: 'waterway', type: 'line', source: 'basemap', 'source-layer': 'waterway',
+      paint: { 'line-color': '#cfd8d5', 'line-width': ['interpolate', ['linear'], ['zoom'], 12, 0.5, 16, 2] } },
+
+    // Footprints at the zoom an officer actually works at.
+    { id: 'buildings', type: 'fill', source: 'basemap', 'source-layer': 'building',
+      minzoom: 14,
+      paint: {
+        'fill-color': '#e6ded0',
+        'fill-outline-color': '#dbd2c2',
+        'fill-opacity': ['interpolate', ['linear'], ['zoom'], 14, 0, 15.5, 0.9],
+      } },
+
+    { id: 'roads-service', type: 'line', source: 'basemap', 'source-layer': 'transportation',
+      minzoom: 14,
+      filter: ['in', ['get', 'class'], ['literal', ['service', 'track', 'path']]],
+      paint: { 'line-color': '#e8e1d5', 'line-width': ['interpolate', ['linear'], ['zoom'], 14, 0.5, 18, 3] } },
     { id: 'roads-minor', type: 'line', source: 'basemap', 'source-layer': 'transportation',
-      minzoom: 13,
-      filter: ['in', ['get', 'class'], ['literal', ['minor', 'service', 'tertiary']]],
-      paint: { 'line-color': '#e4ddd0', 'line-width': ['interpolate', ['linear'], ['zoom'], 13, 0.5, 17, 4] } },
+      minzoom: 12,
+      filter: ['in', ['get', 'class'], ['literal', ['minor', 'tertiary']]],
+      paint: { 'line-color': '#e2dace', 'line-width': ['interpolate', ['linear'], ['zoom'], 12, 0.5, 15, 2.2, 18, 7] } },
     { id: 'roads-major', type: 'line', source: 'basemap', 'source-layer': 'transportation',
       filter: ['in', ['get', 'class'], ['literal', ['motorway', 'trunk', 'primary', 'secondary']]],
-      paint: { 'line-color': '#d8cfbf', 'line-width': ['interpolate', ['linear'], ['zoom'], 9, 0.6, 13, 1.6, 17, 7] } },
+      paint: { 'line-color': '#d6ccba', 'line-width': ['interpolate', ['linear'], ['zoom'], 11, 1, 14, 3, 18, 10] } },
+
+    // Street names: the difference between a picture and something you can navigate.
+    { id: 'street-labels', type: 'symbol', source: 'basemap', 'source-layer': 'transportation_name',
+      minzoom: 14,
+      layout: {
+        'text-field': ['coalesce', ['get', 'name:en'], ['get', 'name']],
+        'text-font': ['Noto Sans Regular'],
+        'text-size': ['interpolate', ['linear'], ['zoom'], 14, 9.5, 17, 12],
+        'symbol-placement': 'line',
+        'text-max-angle': 35,
+        'text-letter-spacing': 0.02,
+      },
+      paint: { 'text-color': '#8a8173', 'text-halo-color': PAPER, 'text-halo-width': 1.3 } },
+
     { id: LABELS, type: 'symbol', source: 'basemap', 'source-layer': 'place',
       filter: ['in', ['get', 'class'], ['literal', ['city', 'town', 'suburb', 'neighbourhood']]],
       layout: {
         'text-field': ['coalesce', ['get', 'name:en'], ['get', 'name']],
         'text-font': ['Noto Sans Regular'],
-        'text-size': ['interpolate', ['linear'], ['zoom'], 10, 10, 15, 13],
+        'text-size': ['interpolate', ['linear'], ['zoom'], 11, 10, 15, 13],
         'text-transform': 'uppercase',
         'text-letter-spacing': 0.08,
         'text-max-width': 8,
@@ -121,14 +243,27 @@ export function ZoneMap({
     const map = new maplibregl.Map({
       container: hostRef.current,
       style: BASE_STYLE,
-      center: [-118.545, 34.052],
-      zoom: 12.4,
+      center: [-118.545, 34.055],
+      zoom: 12.8,
+      minZoom: MIN_ZOOM,
+      maxZoom: MAX_ZOOM,
+      // Hard stop: the view cannot leave the incident.
+      maxBounds: lockedBounds(),
+      // No cross-fade between zoom levels: on an operations board a tile that is there
+      // should be drawn, not eased in over 300ms.
+      fadeDuration: 0,
+      // The locked region is a few dozen tiles, so nothing ever needs evicting.
+      maxTileCacheSize: 400,
+      refreshExpiredTiles: false,
       attributionControl: { compact: true },
     });
     mapRef.current = map;
 
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
     map.addControl(new maplibregl.ScaleControl({ unit: 'imperial' }), 'bottom-left');
+
+    const warm = new AbortController();
+    void warmTiles(lockedBounds(), warm.signal);
 
     map.on('load', () => {
       map.addSource('perimeter', {
@@ -213,7 +348,7 @@ export function ZoneMap({
       map.on('mouseenter', 'households', () => { map.getCanvas().style.cursor = 'pointer'; });
       map.on('mouseleave', 'households', () => { map.getCanvas().style.cursor = ''; });
 
-      map.fitBounds(boundsOf(PERIMETER), { padding: 32, animate: false });
+      map.fitBounds(boundsOf(PERIMETER), { padding: 28, animate: false });
 
       readyRef.current = true;
       paint(map, dataRef.current.addresses, dataRef.current.now, dataRef.current.mode);
@@ -221,6 +356,7 @@ export function ZoneMap({
 
     return () => {
       readyRef.current = false;
+      warm.abort();
       map.remove();
       mapRef.current = null;
     };

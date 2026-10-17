@@ -57,6 +57,8 @@ export const getAddress = (id: string): AddressState | undefined => store.addres
 export function applyUpdate(update: StatusUpdate): AddressState | null {
   const current = store.addresses.get(update.address_id);
   if (!current) return null;
+  // Same rule as the Supabase path: this board records nothing outside the incident.
+  if (!current.inside_perimeter) return null;
 
   const at = update.recorded_at ?? new Date().toISOString();
   const next: AddressState = { ...current };

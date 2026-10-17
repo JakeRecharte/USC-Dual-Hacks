@@ -101,15 +101,21 @@ is the shared source of truth, so only do it if that isn't going to land in time
 
 | Source | Used for | Status |
 |---|---|---|
-| `web/src/lib/addresses.ts` | 79 fake households: 8 Palisades zones + 2 outside | in place, swap for Supabase |
+| `web/src/lib/addresses.ts` | 77 fake households across 8 Palisades zones | in place, swap for Supabase |
 | `GET /api/events` (ours) | status changes, officer → dispatcher | working |
 | `GET {telephony}/events` | live call queue: `lookup`, `call_logged`, `bypass`, `emotion` | working, needs the server up |
 | `POST {BACKEND_URL}/update_status` | mirroring taps into Supabase | waiting on P2 |
 
-The first seven fake households are copied from `server/src/backend.js` — same addresses,
-resident names, statuses and ages — so a real phone call and the board agree on screen. The
-rest are generated from per-zone street lists with a fixed seed, so the board is identical on
-every run and the demo's numbers cannot drift.
+Households `a1`–`a5` are copied from `server/src/backend.js` — same addresses, resident
+names, statuses and ages — so a real phone call and the board agree on screen. The rest are
+generated from per-zone street lists with a fixed seed, so the board is identical on every
+run and the demo's numbers cannot drift.
+
+**P1, worth knowing:** the agent's `a6` (Crenshaw) and `a7` (Vermont) are deliberately not on
+this board. It covers one incident, so anything outside the perimeter never enters — reads
+drop it and writes against it are refused. Nothing changes for the agent: it still answers
+those calls, and the routine-mode call in the demo is still about Dorothy Hayes on Crenshaw.
+It simply is not a pin on this map, which is the dual-use point rather than a gap.
 
 ## 5. Consuming P1's emotion work (done)
 

@@ -115,7 +115,11 @@ describe('seed data', () => {
     assert.equal(byId.get('a2')!.status, 'refused');
     assert.equal(byId.get('a2')!.note, '2 adults staying, 1 on oxygen');
     assert.equal(urgencyOf(byId.get('a4')!, NOW), 'watch', 'a4 is the stale clear');
-    assert.equal(byId.get('a6')!.inside_perimeter, false);
+  });
+
+  it('seeds nothing outside the perimeter: the board covers one incident', () => {
+    assert.ok(seeded.length > 0);
+    assert.ok(seeded.every((a) => a.inside_perimeter), 'every seeded household is inside');
   });
 
   it('gives every zone inside the perimeter something to knock on', () => {
