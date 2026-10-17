@@ -6,6 +6,8 @@ import { route } from './routing.js';
 import { db, dbFailed } from './db.js';
 import { pointInPolygon } from './geo.js';
 import { callReport } from './reports.js';
+import { explainDecision } from './reasoning.js';
+import { suggestResources } from './resources.js';
 
 // One address per scripted test case in team_plan.md, plus a stale and an outside one.
 // Ids match the board's seed (docs/SUPABASE_SETUP.md §3) so memory mode and Supabase agree.
@@ -222,14 +224,35 @@ async function currentStatus(address, now, subject_name) {
     try {
       const row = findHousehold(await dbHouseholds(now), address, subject_name);
       if (!row) return null;
-      const { data, error } = await db.from('status_log').select('status').eq('address_id', row.id)
+      const { data, error } = await db.from('status_log').select('status, note').eq('address_id', row.id)
         .order('recorded_at', { ascending: false }).limit(1);
       if (error) throw error;
-      return { address_id: row.id, status: data[0]?.status ?? 'unknown' };
+      return { address_id: row.id, status: data[0]?.status ?? 'unknown', note: data[0]?.note ?? null };
     } catch (err) { dbFailed('current status', err); }
   }
   const row = findHousehold(FAKE_ADDRESSES, address, subject_name);
-  return row ? { address_id: row.id, status: fakeLatest(row, now)?.status ?? 'unknown' } : null;
+  const latest = row ? fakeLatest(row, now) : null;
+  return row ? { address_id: row.id, status: latest?.status ?? 'unknown', note: latest?.note ?? null } : null;
+}
+
+async function houseThreat(addressId) {
+  if (!db || !addressId || !UUID.test(addressId)) return null;
+  try {
+    const { data, error } = await db.from('houses').select('fire_threat_level').eq('id', addressId).maybeSingle();
+    if (error) throw error;
+    return data?.fire_threat_level ?? null;
+  } catch { return null; } // houses.sql not run yet: suggestions just lack the threat level
+}
+
+// The dashboard's view of a decision: the steps behind it and what to send. Dispatcher-facing,
+// so it uses the true record and the officer's note, not the caller-facing gated lookup.
+async function agentView(row, now) {
+  const record = row.address ? (await currentStatus(row.address, now, row.subject_name)) ?? {} : {};
+  const threat = await houseThreat(row.address_id ?? record.address_id);
+  return {
+    ...(row.decision_trace ? { reasoning: explainDecision(row.decision_trace, row) } : {}),
+    suggestions: suggestResources({ row, record, threat }),
+  };
 }
 
 async function writeReport(report, now) {
@@ -320,10 +343,11 @@ const RETELL_COLUMNS = ['status', 'direction', 'started_at', 'ended_at', 'durati
   'transfer_status', 'bypass', 'bypass_reason', 'distress_score', 'lookup_found', 'lookup_status', 'name_match',
   'inside_perimeter', 'report_written', 'transcript', 'summary', 'user_sentiment', 'recording_url', 'latency_ms'];
 const MAP_COLUMNS = ['lat', 'lng', 'geo_precision', 'decision_trace'];
-// Newest migration first: calls_map.sql adds MAP_COLUMNS, calls_retell.sql RETELL_COLUMNS. If a
+const AGENT_COLUMNS = ['reasoning', 'suggestions'];
+// Newest migration first: houses.sql adds AGENT_COLUMNS, calls_map.sql MAP_COLUMNS, calls_retell.sql RETELL_COLUMNS. If a
 // group's columns are missing, drop just that group and keep writing the rest; re-checked every
 // minute, so running the migration takes effect without a redeploy.
-const GROUPS = [BASE_COLUMNS, RETELL_COLUMNS, MAP_COLUMNS];
+const GROUPS = [BASE_COLUMNS, RETELL_COLUMNS, MAP_COLUMNS, AGENT_COLUMNS];
 let level = GROUPS.length;
 let levelCheckedAt = 0;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -346,7 +370,8 @@ function persist(row) {
     if (level > 1 && (error.code === 'PGRST204' || /column/i.test(error.message))) {
       level -= 1;
       levelCheckedAt = Date.now();
-      dbFailed('calls upsert', `${error.message}: run ${level === 2 ? 'docs/sql/calls_map.sql' : 'docs/sql/calls_retell.sql'}; writing older columns until then`);
+      const file = ['', 'docs/sql/calls_retell.sql', 'docs/sql/calls_map.sql', 'docs/sql/houses.sql'][level];
+      dbFailed('calls upsert', `${error.message}: run ${file}; writing older columns until then`);
       if (level < 2 && row.routing == null) return;
       attempt().then(handle, (err) => dbFailed('calls upsert', err));
       return;
@@ -393,13 +418,21 @@ export async function logCall(payload, now) {
   }
 
   const geo = lookup._geo;
-  const row = upsertRow(payload.call_id, { ...payload, address_id: lookup.address_id, prior_callers, report_written, ...decision,
-    decision_trace: trace, ...(geo ? { lat: geo.lat, lng: geo.lng, geo_precision: geo.precision } : {}) }, now);
+  const draft = { ...payload, address_id: lookup.address_id, prior_callers, report_written, ...decision,
+    lookup_found: lookup.found, lookup_status: lookup.status, inside_perimeter: lookup.inside_perimeter,
+    decision_trace: trace, ...(geo ? { lat: geo.lat, lng: geo.lng, geo_precision: geo.precision } : {}) };
+  const row = upsertRow(payload.call_id, { ...draft, ...(await agentView(draft, now)) }, now);
   return { row, lookup };
 }
 
 // The call ended without log_call: the caller hung up, or the emergency path transferred
 // them first. Nobody disappears from the board.
+export async function refreshSuggestions(callId, now = Date.now()) {
+  const row = calls.get(callId);
+  if (!row) return null;
+  return upsertRow(callId, { suggestions: (await agentView({ ...row, decision_trace: null }, now)).suggestions }, now);
+}
+
 export function logUnrouted(session, call, now) {
   const transferred = Boolean(session?.bypass_reason) || call.disconnection_reason === 'call_transfer';
   return upsertRow(call.call_id, {

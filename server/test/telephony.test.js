@@ -457,3 +457,60 @@ test('a house we do not have is placed at the centre of its street', () => {
   assert.ok(Math.abs(g.lat - 34.05) < 1e-9 && Math.abs(g.lng + 118.53) < 1e-9);
   assert.equal(streetGeo(sameStreet(rows, '9 Nowhere Ln')), null);
 });
+
+// ── Dispatch dashboard: reasoning steps and resource suggestions ──
+import { explainDecision } from '../src/reasoning.js';
+import { suggestResources } from '../src/resources.js';
+
+test('reasoning: refused + repeat caller reads as record, area, rule, adjustment, outcome', async () => {
+  const lookup = await lookupAddress({ address: '1515 Via de la Paz', subject_name: 'Harold Kim' }, now);
+  const d = route({ mode: 'wildfire', caller_state: 'worried', prior_callers: 1 }, lookup, now);
+  const steps = explainDecision(d.trace, { address: '1515 Via de la Paz', subject_name: 'Harold Kim' });
+  assert.deepEqual(steps.map((s) => s.kind), ['heard', 'record', 'area', 'caller', 'rule', 'adjust', 'outcome']);
+  assert.match(steps[1].text, /refused \(officer\), 25 min ago/);
+  assert.match(steps.at(-1).text, /Priority queue, severity 5/);
+});
+
+test('reasoning: a wrong name never reveals the record in the explanation', async () => {
+  const lookup = await lookupAddress({ address: '1515 Via de la Paz', subject_name: 'John Smith' }, now);
+  const steps = explainDecision(route({ mode: 'wildfire' }, lookup, now).trace, { address: '1515 Via de la Paz', subject_name: 'John Smith' });
+  assert.ok(steps.every((s) => !/refused/.test(s.text)));
+});
+
+test('suggestions: staying + oxygen note in an extreme-threat street → re-contact and medical standby, now', () => {
+  const s = suggestResources({ row: { address: '1515 Via de la Paz', routing: 'priority_queue', inside_perimeter: true },
+    record: { status: 'refused', note: '2 adults staying, 1 on oxygen' }, threat: 'extreme' });
+  assert.deepEqual(s.map((x) => x.id), ['recontact', 'medical_standby']);
+  assert.ok(s.every((x) => x.priority === 'now' && x.requires_confirmation));
+  assert.match(s[0].why.join(' '), /2 adults staying, 1 on oxygen/);
+});
+
+test('suggestions: injury words → ALS first; trapped → rescue engine', () => {
+  const s = suggestResources({ row: { routing: 'human_now', bypass_reason: 'emergency: said "trapped"', reason: 'my dad fell and is bleeding' } });
+  assert.deepEqual(s.map((x) => x.id).sort(), ['als', 'rescue']);
+});
+
+test('suggestions: never-checked house inside the area → door-knock; a second caller makes it now', () => {
+  const base = { address: '16800 Bollinger Dr', routing: 'priority_queue', inside_perimeter: true, lookup_found: true };
+  assert.equal(suggestResources({ row: base, record: { status: 'unknown' }, threat: 'moderate' })[0].priority, 'soon');
+  assert.equal(suggestResources({ row: { ...base, prior_callers: 1 }, record: { status: 'unknown' }, threat: 'moderate' })[0].priority, 'now');
+});
+
+test('suggestions: answered from a fresh record → no unit needed (the trip avoided)', () => {
+  const s = suggestResources({ row: { routing: 'answered_by_agent', inside_perimeter: true }, record: { status: 'cleared' } });
+  assert.deepEqual(s.map((x) => x.id), ['none']);
+  assert.equal(s[0].requires_confirmation, false);
+});
+
+test('suggestions: failed transfer → callback now; routine outside the area → welfare check', () => {
+  assert.equal(suggestResources({ row: { routing: 'callback_queue', from_number: '+13105550000' } })[0].id, 'callback');
+  const r = suggestResources({ row: { mode: 'routine', routing: 'priority_queue', inside_perimeter: false, last_contact_hours: 336,
+    vulnerability: { age: 84, lives_alone: true, medical: 'oxygen' }, red_flags: { mail_piling: true } }, record: { status: 'unknown' } });
+  assert.equal(r[0].id, 'welfare_check');
+  assert.match(r[0].why.join(' '), /336 h.*age 84.*lives alone.*oxygen.*mail/);
+});
+
+test('suggestions: a call a person is taking now makes its resources now, whatever the threat', () => {
+  const s = suggestResources({ row: { routing: 'human_now', inside_perimeter: true }, record: { status: 'refused', note: '1 on oxygen' }, threat: null });
+  assert.ok(s.length && s.every((x) => x.priority === 'now'));
+});
