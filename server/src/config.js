@@ -17,4 +17,12 @@ export const config = {
   consented: new Set(list(process.env.CONSENTED_NUMBERS)),
   alertsEnabled: process.env.ALERTS_ENABLED === 'true',
   maxDialsPerCluster: Number(process.env.MAX_DIALS_PER_CLUSTER || 25),
+
+  // Keyword pass over the live transcript, every chunk. Flags the session for the console
+  // the moment these are said; the agent's own request_human/transfer does the transfer.
+  bypassPhrases: [
+    'bleeding', 'trapped', "can't get out", 'cant get out', 'stuck inside', 'someone inside',
+    'not breathing', "can't breathe", 'unconscious', 'oxygen', 'gun', 'knife', 'help me',
+    'sangrando', 'atrapado', 'atrapada', 'no puede respirar', 'oxígeno', 'oxigeno',
+  ],
 };

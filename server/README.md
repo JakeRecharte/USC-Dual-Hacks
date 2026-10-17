@@ -29,14 +29,20 @@ outbound calls and verifying `x-retell-signature`.
 
 ## Retell setup
 
-1. Buy a number in Retell directly ($2/mo). Skip Twilio.
-2. Create a Retell LLM agent. Model: Claude Haiku. Paste `retell/agent-prompt.md` as the prompt.
-3. Add the three tools from `retell/tools.json`, replacing `YOUR-TUNNEL` with the ngrok
-   host and `+1TEAMMATE_PHONE` with whoever plays dispatcher.
-4. Agent settings: webhook URL `https://<ngrok-host>/webhook/retell`; max call duration
-   ~5 min; end call after ~20s silence. Silence is billed.
-5. Attach the agent to the number as its inbound agent.
-6. Call the number. Watch terminal 1 and `server/logs/requests.jsonl`.
+The agent config lives in `retell/`, not the dashboard. With the server and ngrok running:
+
+    npm run setup-retell                # creates/updates both agents against the live tunnel
+    npm run setup-retell -- --buy 213   # first time only: also buys a number ($2/mo)
+
+It creates **Line Intake** (inbound, `agent-prompt.md`) and **Line Outbound**
+(`outbound-prompt.md`), on Claude 5.5 Haiku, multilingual, 5 min max, 20s silence
+cutoff, with the webhook and tool URLs pointed at the tunnel. It binds them to the
+number and writes `RETELL_FROM_NUMBER` / `RETELL_OUTBOUND_AGENT_ID` into `.env`.
+
+**Re-run it whenever ngrok restarts or a prompt changes.** Set `DISPATCHER_NUMBER` first
+or bypass calls have nowhere to transfer.
+
+Then call the number. Watch terminal 1 and `server/logs/requests.jsonl`.
 
 ## Checkpoint
 

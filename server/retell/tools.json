@@ -3,7 +3,7 @@
     "type": "custom",
     "name": "report_incident",
     "description": "Call this as soon as you know the incident type and the street. Call again if the caller corrects or adds detail.",
-    "url": "https://YOUR-TUNNEL.ngrok-free.app/fn/report_incident",
+    "url": "{{PUBLIC_URL}}/fn/report_incident",
     "speak_during_execution": true,
     "speak_after_execution": true,
     "timeout_ms": 8000,
@@ -24,7 +24,7 @@
     "type": "custom",
     "name": "request_human",
     "description": "Call immediately if anyone is injured, trapped, or in immediate danger, or the caller asks for a person. Then call transfer_to_human.",
-    "url": "https://YOUR-TUNNEL.ngrok-free.app/fn/request_human",
+    "url": "{{PUBLIC_URL}}/fn/request_human",
     "speak_during_execution": false,
     "speak_after_execution": false,
     "timeout_ms": 3000,
@@ -40,7 +40,12 @@
     "type": "transfer_call",
     "name": "transfer_to_human",
     "description": "Transfer the caller to the human dispatcher.",
-    "transfer_destination": { "type": "predefined", "number": "+1TEAMMATE_PHONE" },
+    "transfer_destination": { "type": "predefined", "number": "{{DISPATCHER_NUMBER}}" },
     "transfer_option": { "type": "warm_transfer" }
+  },
+  {
+    "type": "end_call",
+    "name": "end_call",
+    "description": "End the call only after the caller's report is taken and nobody is in danger, or the caller says goodbye."
   }
 ]

@@ -36,4 +36,11 @@ await post('/fn/report_incident', {
   call,
   args: { incident_type: kind, street: 'Normandie Ave', cross_street: 'W 3rd St', firsthand: true, people_affected: 2, lang: 'en-US' },
 });
+if (kind === 'medical') {
+  // Mid-utterance: the bypass should fire on this chunk, before any function call.
+  await post('/webhook/retell', {
+    event: 'transcript_updated',
+    call: { ...call, transcript: 'Agent: Is anyone hurt?\nUser: my husband is bleeding and' },
+  });
+}
 await post('/webhook/retell', { event: 'call_ended', call: { ...call, transcript: '(simulated)' } });

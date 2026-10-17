@@ -3,6 +3,7 @@ import { appendFile, mkdir } from 'node:fs/promises';
 import { verify } from 'retell-sdk';
 import { config } from './config.js';
 import { triage } from './engine-stub.js';
+import { checkBypass, callerText } from './bypass.js';
 import * as sessions from './sessions.js';
 
 const app = Fastify({ logger: { level: 'info' } });
@@ -91,6 +92,15 @@ app.post('/webhook/retell', { preHandler: verifyRetell }, async (req, reply) => 
         direction: call.direction, from_number: call.from_number, to_number: call.to_number,
         started_at: call.start_timestamp || Date.now(),
       });
+    } else if (event === 'transcript_updated') {
+      const s = sessions.upsert(call.call_id, { transcript: call.transcript });
+      const hit = !s.bypass_reason && checkBypass(callerText(call));
+      if (hit) {
+        sessions.upsert(call.call_id, { lane: 'BYPASS', bypass_reason: `said "${hit}"` });
+        sessions.bus.emit('bypass', { call_id: call.call_id, from_number: call.from_number, reason: hit, now: Date.now() });
+        req.log.warn({ call_id: call.call_id, phrase: hit }, 'BYPASS phrase in live transcript');
+      }
+      return;
     } else if (event === 'call_ended') {
       sessions.upsert(call.call_id, {
         ended_at: call.end_timestamp || Date.now(),
