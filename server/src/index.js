@@ -100,7 +100,7 @@ app.post('/fn/log_call', { preHandler: verifyRetell }, async (req, reply) => {
 app.post('/fn/request_human', { preHandler: verifyRetell }, async (req, reply) => {
   const { call = {}, args: nested, name, ...rest } = req.body;
   const args = nested || rest;
-  reply.send({ transfer: true, say: "I'm connecting you to a person now. Please stay on the line." });
+  reply.send({ transfer: true, say: '' });
 
   setImmediate(() => {
     sessions.upsert(call.call_id, { routing: 'human_now', bypass_reason: args.reason });
