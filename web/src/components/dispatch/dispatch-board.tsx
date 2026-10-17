@@ -22,6 +22,7 @@ import type { AddressState, CallRow, CallerState } from '@/lib/types';
 import { telephonyConfigured, useAddresses, useCalls, useNow } from '@/lib/use-live';
 import { ConnectionDot, ResetButton, SignOutButton, StatusChip, StructureChip } from '@/components/ui';
 import type { MapMode } from './zone-map';
+import { RetellAlerts } from './retell-alerts';
 
 // Leaflet touches `window` at import time, so the map only ever loads in the browser.
 const ZoneMap = dynamic(() => import('./zone-map').then((m) => m.ZoneMap), {
@@ -113,6 +114,8 @@ export function DispatchBoard() {
           see docs/SUPABASE_SETUP.md.
         </p>
       )}
+
+      <RetellAlerts />
 
       <div className="grid flex-1 gap-4 p-4 lg:grid-cols-[minmax(0,1fr)_380px]">
         <section className="flex min-w-0 flex-col gap-4">

@@ -212,7 +212,6 @@ app.post('/webhook/retell', { preHandler: verifyRetell }, async (req, reply) => 
       // Hung up before routing, or transferred on the emergency path: still gets a routing.
       if (!ended.logged) {
         const row = backend.logUnrouted(ended, call, Date.now());
-        backend.refreshSuggestions(call.call_id).catch((err) => req.log.error({ err: err.message }, 'suggestions failed'));
         sessions.upsert(call.call_id, { routing: row.routing, logged: true });
         sessions.bus.emit('call_logged', { ...row, simulated: Boolean(call.simulated) });
         req.log.warn({ call_id: call.call_id, routing: row.routing, reason: row.reason }, 'call ended unrouted');
@@ -225,7 +224,6 @@ app.post('/webhook/retell', { preHandler: verifyRetell }, async (req, reply) => 
       if (s?.transfer !== 'connected') {
         const detail = call.transfer_status || call.disconnection_reason || event;
         const row = backend.logTransferFailed(call.call_id, call.from_number ?? s?.from_number, detail, Date.now());
-        backend.refreshSuggestions(call.call_id).catch((err) => req.log.error({ err: err.message }, 'suggestions failed'));
         sessions.upsert(call.call_id, { transfer: 'failed', routing: row.routing, logged: true });
         backend.patchCall(call.call_id, { transfer_status: 'failed' });
         sessions.bus.emit('call_logged', { ...row, simulated: Boolean(call.simulated) });

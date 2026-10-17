@@ -88,6 +88,8 @@ check('insert status_log', await db.from('status_log').insert(statuses));
 if (!process.argv.includes('--keep-calls')) {
   check('clear calls', await db.from('calls').delete().not('call_id', 'is', null));
 }
+// Retell alerts from the last run (house_colors.sql); absent before that SQL runs.
+await db.from('house_events').delete().not('id', 'is', null);
 
 console.log(`reset: ${households.length} households synced (${stray.length} stray removed), ${statuses.length} statuses re-based to now, call log ${process.argv.includes('--keep-calls') ? 'kept' : 'cleared'}`);
 

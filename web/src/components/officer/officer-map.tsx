@@ -14,7 +14,7 @@ import { useEffect, useRef, useState } from 'react';
 import * as maplibreNs from 'maplibre-gl';
 import type { Map as MlMap, StyleSpecification } from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
-import { STATUS_COLOR } from '@/lib/priority';
+import { HOUSE_COLOR, STATUS_COLOR } from '@/lib/priority';
 import { NEARBY_RADIUS_M, type LatLng } from '@/lib/geo';
 import type { OfficerPosition } from '@/lib/officer-position';
 import type { AddressState } from '@/lib/types';
@@ -553,7 +553,8 @@ function paintHouses(
       const ring = outlines?.get(siteKey(a.lat, a.lng)) ?? squareAround(a.lat, a.lng);
       const shared = {
         id: a.id,
-        color: STATUS_COLOR[a.status],
+        // Supabase's colour (record + Retell calls) when it has one; else the status colour.
+        color: a.color ? HOUSE_COLOR[a.color] : STATUS_COLOR[a.status],
         // `unknown` is drawn lighter than `no_answer`: same colour, different weight, so
         // "never contacted" and "knocked, nobody home" are not the same mark.
         fillOpacity: a.status === 'unknown' ? 0.45 : 0.85,

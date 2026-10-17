@@ -1,6 +1,6 @@
 // How a status becomes a colour, a heat weight and a place in the door-knock list.
 // Pure, with `now` injected, so the board and the tests agree.
-import type { AddressState, Status } from './types';
+import type { AddressState, HouseColor, Status } from './types';
 
 /** docs/DATA_CONTRACT.md §3: a cleared/self_out status older than this is stale. */
 export const FRESH_MIN = 120;
@@ -42,6 +42,17 @@ export const STATUS_COLOR: Record<Status, string> = {
   refused: URGENCY_COLOR.critical,
   no_answer: URGENCY_COLOR.watch,
   unknown: URGENCY_COLOR.watch,
+};
+
+/**
+ * Supabase's green / yellow / red (houses.color). Red and green reuse the validated urgency
+ * steps; yellow is a dark ochre that holds 3:1 against the paper ground. When a house has a
+ * Supabase colour it wins; otherwise the map falls back to its own status colours.
+ */
+export const HOUSE_COLOR: Record<HouseColor, string> = {
+  red: URGENCY_COLOR.critical,
+  yellow: '#a87c12',
+  green: URGENCY_COLOR.clear,
 };
 
 /**

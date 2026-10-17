@@ -14,7 +14,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 // below are erased, so they need none.
 import { PERIMETER } from './zones.ts';
 import { pointInPolygon } from './geo.ts';
-import type { AddressState, Source, Status, Structure } from './types';
+import type { AddressState, HouseColor, Source, Status, Structure } from './types';
 
 export const ADDRESS_COLUMNS = 'id, address, lat, lng, zone_id, resident_name';
 export const STATUS_COLUMNS = 'address_id, status, source, note, recorded_at';
@@ -83,30 +83,72 @@ export function joinRows(addresses: AddressRowDb[], statuses: StatusRowDb[]): Ad
     });
 }
 
-/** Everything the board needs, in two queries. */
+/**
+ * Supabase returns at most 1,000 rows per request and the board has ~2,000 households and
+ * more statuses than that, so every read pages until a short page comes back.
+ */
+export async function fetchAll<T>(page: (from: number, to: number) => PromiseLike<{ data: unknown; error: { message: string } | null }>): Promise<T[]> {
+  const rows: T[] = [];
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await page(from, from + 999);
+    if (error) throw new Error(error.message);
+    const chunk = (data ?? []) as T[];
+    rows.push(...chunk);
+    if (chunk.length < 1000) return rows;
+  }
+}
+
+interface HouseColorRowDb {
+  id: string;
+  color: string | null;
+  color_reason: string | null;
+}
+
+/** Everything the board needs: every household, every status, and Supabase's colours. */
 export async function fetchBoard(client: SupabaseClient): Promise<AddressState[]> {
   // `structure` may not exist yet, so it is asked for separately and the request retried
   // without it rather than failing the whole board.
-  let addresses: AddressRowDb[] | null = null;
-  const withStructure = await client
-    .from('addresses')
-    .select(`${ADDRESS_COLUMNS}, structure, structure_recorded_at`);
-
-  if (withStructure.error) {
-    const plain = await client.from('addresses').select(ADDRESS_COLUMNS);
-    if (plain.error) throw new Error(`addresses: ${plain.error.message}`);
-    addresses = plain.data as AddressRowDb[];
-  } else {
-    addresses = withStructure.data as AddressRowDb[];
+  let addresses: AddressRowDb[];
+  try {
+    addresses = await fetchAll<AddressRowDb>((from, to) =>
+      client.from('addresses').select(`${ADDRESS_COLUMNS}, structure, structure_recorded_at`).order('id').range(from, to));
+  } catch {
+    try {
+      addresses = await fetchAll<AddressRowDb>((from, to) => client.from('addresses').select(ADDRESS_COLUMNS).order('id').range(from, to));
+    } catch (e) {
+      throw new Error(`addresses: ${(e as Error).message}`);
+    }
   }
 
-  const statuses = await client
-    .from('status_log')
-    .select(STATUS_COLUMNS)
-    .order('recorded_at', { ascending: false });
-  if (statuses.error) throw new Error(`status_log: ${statuses.error.message}`);
+  let statuses: StatusRowDb[];
+  try {
+    statuses = await fetchAll<StatusRowDb>((from, to) =>
+      client.from('status_log').select(STATUS_COLUMNS).order('recorded_at', { ascending: false }).range(from, to));
+  } catch (e) {
+    throw new Error(`status_log: ${(e as Error).message}`);
+  }
 
-  return joinRows(addresses ?? [], (statuses.data ?? []) as StatusRowDb[]);
+  // Colours are optional: before house_colors.sql runs the board keeps its own status colours.
+  let colors: HouseColorRowDb[] = [];
+  try {
+    colors = await fetchAll<HouseColorRowDb>((from, to) => client.from('houses').select('id, color, color_reason').order('id').range(from, to));
+  } catch {
+    colors = [];
+  }
+
+  return withColors(joinRows(addresses, statuses), colors);
+}
+
+const HOUSE_COLORS: HouseColor[] = ['green', 'yellow', 'red'];
+
+/** Attach Supabase's colour to each household; unknown values are ignored, not trusted. */
+export function withColors(rows: AddressState[], colors: HouseColorRowDb[]): AddressState[] {
+  const byId = new Map(colors.map((c) => [c.id, c]));
+  return rows.map((r) => {
+    const c = byId.get(r.id);
+    if (!c || !HOUSE_COLORS.includes(c.color as HouseColor)) return r;
+    return { ...r, color: c.color as HouseColor, color_reason: c.color_reason ?? null };
+  });
 }
 
 export interface StatusWrite {

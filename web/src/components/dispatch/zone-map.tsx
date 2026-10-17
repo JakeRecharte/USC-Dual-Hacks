@@ -10,7 +10,7 @@ import * as maplibreNs from 'maplibre-gl';
 import type { Map as MlMap, StyleSpecification } from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { PERIMETER, ZONE_NAMES, type LatLngTuple } from '@/lib/zones';
-import { HEAT_STOPS, URGENCY_COLOR, URGENCY_WEIGHT, reasonOf, urgencyOf, zoneSummaries } from '@/lib/priority';
+import { HEAT_STOPS, HOUSE_COLOR, URGENCY_COLOR, URGENCY_WEIGHT, reasonOf, urgencyOf, zoneSummaries } from '@/lib/priority';
 import { STATUS_LABEL, STRUCTURE_LABEL } from '@/lib/types';
 import type { AddressState } from '@/lib/types';
 
@@ -516,7 +516,7 @@ function paint(
         geometry: { type: 'Polygon', coordinates: [ring] },
         properties: {
           id: a.id,
-          color: URGENCY_COLOR[urgency],
+          color: a.color ? HOUSE_COLOR[a.color] : URGENCY_COLOR[urgency],
           // Under the density layer the outlines recede so the blobs read.
           fillOpacity: heatMode ? 0.45 : 0.85,
           popup: popupHtml(a, now),
@@ -533,7 +533,7 @@ function paint(
         type: 'Feature',
         geometry: { type: 'Point', coordinates: [a.lng, a.lat] },
         properties: {
-          color: URGENCY_COLOR[urgency],
+          color: a.color ? HOUSE_COLOR[a.color] : URGENCY_COLOR[urgency],
           weight: URGENCY_WEIGHT[urgency],
           dotOpacity: heatMode ? 0.5 : 0.9,
         },
@@ -602,7 +602,7 @@ function popupHtml(a: AddressState, now: number): string {
         a.address,
       )}</div>
       <div style="margin-top:2px;color:#6f665a">${escapeHtml(a.resident_name)}</div>
-      <div style="margin-top:7px;color:${URGENCY_COLOR[urgency]};font-weight:600">${STATUS_LABEL[a.status]}</div>
+      <div style="margin-top:7px;color:${a.color ? HOUSE_COLOR[a.color] : URGENCY_COLOR[urgency]};font-weight:600">${STATUS_LABEL[a.status]}${a.color_reason ? ` · ${a.color_reason}` : ''}</div>
       <div style="color:#6f665a">${escapeHtml(reasonOf(a, now))}</div>
       ${damage}
       ${note}

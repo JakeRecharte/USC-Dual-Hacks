@@ -106,6 +106,8 @@ export function useAddresses() {
       .channel('line-board')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'status_log' }, refetch)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'addresses' }, refetch)
+      // Retell calls recolour houses (house_colors.sql); repaint when Supabase does.
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'houses' }, refetch)
       .subscribe((status) => {
         if (status === 'SUBSCRIBED') setConnection('live');
         else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') setConnection('offline');
