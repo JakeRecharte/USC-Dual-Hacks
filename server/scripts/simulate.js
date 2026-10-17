@@ -1,15 +1,14 @@
-// Fakes Retell traffic against a server, signed the same way Retell signs.
-//   npm run simulate                    one flood call (NOVEL first time, CORROBORATING after)
-//   npm run simulate -- medical         a bypass call, flagged mid-utterance
-//   npm run simulate -- surge           one first report, then six more at once on the same street
-//   npm run simulate -- surge --url https://usc-dual-hacks-production.up.railway.app
+// Runs the six scripted calls from team_plan.md against a server, signed like Retell.
+//   npm run simulate                       all six, local server
+//   npm run simulate -- refused            one case by name
+//   npm run simulate -- --url https://usc-dual-hacks-production.up.railway.app
 import { sign } from 'retell-sdk';
 import { config } from '../src/config.js';
 
 const argv = process.argv.slice(2);
 const urlAt = argv.indexOf('--url');
 const base = urlAt >= 0 ? argv[urlAt + 1].replace(/\/$/, '') : `http://localhost:${config.port}`;
-const kind = argv.find((a, i) => !a.startsWith('--') && argv[i - 1] !== '--url') || 'flood';
+const only = argv.find((a, i) => !a.startsWith('--') && argv[i - 1] !== '--url');
 
 if (!config.retellApiKey) {
   console.error('Set RETELL_API_KEY in server/.env first (needed to sign requests).');
@@ -23,41 +22,33 @@ async function post(path, body) {
     headers: { 'content-type': 'application/json', 'x-retell-signature': await sign(raw, config.retellApiKey) },
     body: raw,
   });
-  const text = await res.text();
-  console.log(res.status, path, text.slice(0, 160));
+  return res.status === 204 ? null : res.json();
 }
 
-function fakeCall(i) {
-  return {
-    call_id: `sim_${Date.now()}_${i}`,
-    direction: 'inbound',
-    from_number: `+1310555${String(200 + i).padStart(4, '0')}`,
-    to_number: config.fromNumber || '+13105550199',
-    simulated: true,
-  };
-}
+const CASES = {
+  cleared: { said: "I'm calling about my mom Maria Lopez, 1420 Sunset Mesa Drive.", log: { mode: 'wildfire', address: '1420 Sunset Mesa Dr', subject_name: 'Maria Lopez', with_them_now: false } },
+  refused: { said: 'My father Harold Kim at 1515 Via de la Paz, I can\'t reach him.', log: { mode: 'wildfire', address: '1515 Via de la Paz', subject_name: 'Harold Kim', with_them_now: false } },
+  unknown: { said: 'My aunt Ruth Adams, 16800 Bollinger Drive, nobody has heard from her.', log: { mode: 'wildfire', address: '16800 Bollinger Dr', subject_name: 'Ruth Adams', with_them_now: false } },
+  emergency: { said: "I'm with my mom Maria Lopez right now and she can't breathe", log: { mode: 'wildfire', address: '1420 Sunset Mesa Dr', subject_name: 'Maria Lopez', with_them_now: true, emergency: true } },
+  routine_high: { said: "I haven't heard from my grandma Dorothy Hayes in two weeks. She's 84, lives alone, on oxygen. Her mail is piling up.", log: { mode: 'routine', address: '4512 Crenshaw Blvd', subject_name: 'Dorothy Hayes', with_them_now: false, last_contact_hours: 336, vulnerability: { age: 84, lives_alone: true, medical: 'oxygen' }, red_flags: { mail_piling: true } } },
+  routine_low: { said: "My brother Kevin Nguyen hasn't texted back since this morning. He's 40 and healthy.", log: { mode: 'routine', address: '910 N Vermont Ave', subject_name: 'Kevin Nguyen', with_them_now: false, last_contact_hours: 6, vulnerability: { age: 40 }, red_flags: {} } },
+};
 
-async function oneCall(call, args, midUtterance) {
+let n = 0;
+for (const [name, c] of Object.entries(CASES)) {
+  if (only && only !== name) continue;
+  const call = { call_id: `sim_${Date.now()}_${++n}`, direction: 'inbound', from_number: `+1310555${String(300 + n).padStart(4, '0')}`, simulated: true };
+  console.log(`\n── ${name}`);
+  console.log(`   Caller: "${c.said}"`);
   await post('/webhook/retell', { event: 'call_started', call });
-  if (midUtterance) {
-    await post('/webhook/retell', { event: 'transcript_updated', call: { ...call, transcript: midUtterance } });
+  await post('/webhook/retell', { event: 'transcript_updated', call: { ...call, transcript: `Agent: Is anyone hurt or in danger?\nUser: ${c.said}` } });
+  if (!c.log.with_them_now) {
+    const l = await post('/fn/lookup_address', { name: 'lookup_address', call, args: { address: c.log.address, subject_name: c.log.subject_name } });
+    console.log(`   lookup_address → ${l.status ?? 'no status'}${l.inside_perimeter ? ', inside perimeter' : ''}`);
+    console.log(`   Agent:  "${l.say}"`);
   }
-  await post('/fn/report_incident', { name: 'report_incident', call, args });
-  await post('/webhook/retell', { event: 'call_ended', call: { ...call, transcript: '(simulated)' } });
-}
-
-const flood = { incident_type: 'flood', street: 'Normandie Ave', cross_street: 'W 3rd St', firsthand: true, people_affected: 2, lang: 'en-US' };
-
-if (kind === 'surge') {
-  // First witness goes to a dispatcher (NOVEL); the next six land on the known incident
-  // (CORROBORATING) concurrently, the way a real surge arrives.
-  await oneCall(fakeCall(0), flood);
-  const langs = ['es-ES', 'en-US', 'ko-KR', 'en-US', 'es-ES', 'en-US'];
-  await Promise.all(langs.map((lang, i) => oneCall(fakeCall(i + 1), { ...flood, lang })));
-  const state = await (await fetch(base + '/state')).json();
-  console.log(`\nclusters: ${state.clusters.map((c) => `${c.id} independent=${c.independent} sources=${c.sources}`).join('; ')}`);
-} else if (kind === 'medical') {
-  await oneCall(fakeCall(0), { ...flood, incident_type: 'medical' }, 'Agent: Is anyone hurt?\nUser: my husband is bleeding and');
-} else {
-  await oneCall(fakeCall(0), { ...flood, incident_type: kind });
+  const r = await post('/fn/log_call', { name: 'log_call', call, args: c.log });
+  console.log(`   log_call → ${r.routing} (severity ${r.severity}) — ${r.reason}`);
+  console.log(`   Agent:  "${r.say}"${r.transfer ? '  [TRANSFER]' : ''}`);
+  await post('/webhook/retell', { event: 'call_ended', call });
 }

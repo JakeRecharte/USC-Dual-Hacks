@@ -2,10 +2,11 @@ import Fastify from 'fastify';
 import { appendFile, mkdir } from 'node:fs/promises';
 import { verify } from 'retell-sdk';
 import { config } from './config.js';
-import { triage } from './engine-stub.js';
 import { checkBypass, callerText } from './bypass.js';
 import * as sessions from './sessions.js';
-import * as clusters from './cluster-stub.js';
+import * as backend from './backend.js';
+import { FRESH_MIN } from './routing.js';
+import { sayForLookup, sayForRouting } from './speech.js';
 
 const app = Fastify({ logger: { level: 'info' } });
 
@@ -38,39 +39,56 @@ async function verifyRetell(req, reply) {
   }
 }
 
-// Custom function, called by the agent mid-conversation.
+// Custom functions, called by the agent mid-conversation.
 // Body is { name, call, args } (or args at root if args_at_root is on in Retell).
-app.post('/fn/report_incident', { preHandler: verifyRetell }, async (req, reply) => {
-  const { call = {}, args: nested, name, ...rest } = req.body;
-  const args = nested || rest;
-  const now = Date.now();
+const argsOf = (body) => {
+  const { call = {}, args: nested, name, ...rest } = body;
+  return { call, args: nested || rest };
+};
 
-  const signal = {
-    incident_type: args.incident_type,
-    street: args.street,
-    cross_street: args.cross_street,
-    firsthand: args.firsthand,
-    people_affected: args.people_affected,
-    lang: args.lang,
+app.post('/fn/lookup_address', { preHandler: verifyRetell }, async (req, reply) => {
+  const { call, args } = argsOf(req.body);
+  const now = Date.now();
+  const lookup = await backend.lookupAddress(args);
+  const say = sayForLookup(lookup, args.subject_name, now, FRESH_MIN);
+
+  // Answer first: the caller is listening to silence until this returns.
+  reply.send({ ...lookup, say });
+
+  setImmediate(() => {
+    sessions.upsert(call.call_id, { address: args.address, subject_name: args.subject_name, lookup });
+    sessions.bus.emit('lookup', { call_id: call.call_id, address: args.address, subject_name: args.subject_name, ...lookup, now });
+    req.log.info({ call_id: call.call_id, address: args.address, found: lookup.found, name_match: lookup.name_match, status: lookup.status }, 'lookup');
+  });
+});
+
+app.post('/fn/log_call', { preHandler: verifyRetell }, async (req, reply) => {
+  const { call, args } = argsOf(req.body);
+  const now = Date.now();
+  const session = sessions.get(call.call_id);
+  const payload = {
+    mode: args.mode === 'routine' ? 'routine' : 'wildfire',
+    address: args.address,
+    subject_name: args.subject_name,
+    with_them_now: args.with_them_now === true,
+    // Emergency words heard mid-sentence count even if the agent didn't flag them.
+    emergency: args.emergency === true || Boolean(session?.bypass_reason),
+    caller_update: args.caller_update || null,
+    last_contact_hours: args.last_contact_hours ?? null,
+    vulnerability: args.vulnerability || {},
+    red_flags: args.red_flags || {},
     call_id: call.call_id,
     from_number: call.from_number,
   };
+  const { row } = await backend.logCall(payload, now);
+  const transfer = row.routing === 'human_now' || row.routing === 'priority_queue';
 
-  const decision = triage(signal, { cluster: clusters.lookup(signal) }, now);
-  const transfer = decision.lane === 'BYPASS' || decision.lane === 'NOVEL';
-
-  // Answer first: the caller is listening to silence until this returns.
-  reply.send({ lane: decision.lane, say: decision.say, transfer });
-
-  // Recorded in the same tick as the lookup, so two concurrent callers never hear the
-  // same count. Cheap and synchronous; anything slow goes in setImmediate below.
-  const cluster = clusters.observe(signal, now);
+  reply.send({ routing: row.routing, severity: row.severity, reason: row.reason, transfer, say: sayForRouting[row.routing] });
 
   setImmediate(() => {
-    sessions.addSignal(signal.call_id, signal, decision);
-    sessions.bus.emit('signal', { signal, decision, now, simulated: Boolean(call.simulated) });
-    if (cluster) sessions.bus.emit('cluster', cluster);
-    req.log.info({ call_id: signal.call_id, lane: decision.lane, signal }, 'triaged');
+    sessions.upsert(call.call_id, { routing: row.routing, severity: row.severity });
+    sessions.bus.emit('call_logged', { ...row, simulated: Boolean(call.simulated) });
+    req.log.info({ call_id: call.call_id, routing: row.routing, severity: row.severity, reason: row.reason }, 'call logged');
   });
 });
 
@@ -82,7 +100,7 @@ app.post('/fn/request_human', { preHandler: verifyRetell }, async (req, reply) =
   reply.send({ transfer: true, say: "I'm connecting you to a person now. Please stay on the line." });
 
   setImmediate(() => {
-    sessions.upsert(call.call_id, { lane: 'BYPASS', bypass_reason: args.reason });
+    sessions.upsert(call.call_id, { routing: 'human_now', bypass_reason: args.reason });
     sessions.bus.emit('bypass', { call_id: call.call_id, from_number: call.from_number, reason: args.reason, now: Date.now() });
     req.log.warn({ call_id: call.call_id, reason: args.reason }, 'BYPASS requested');
   });
@@ -103,7 +121,7 @@ app.post('/webhook/retell', { preHandler: verifyRetell }, async (req, reply) => 
       const s = sessions.upsert(call.call_id, { transcript: call.transcript });
       const hit = !s.bypass_reason && checkBypass(callerText(call));
       if (hit) {
-        sessions.upsert(call.call_id, { lane: 'BYPASS', bypass_reason: `said "${hit}"` });
+        sessions.upsert(call.call_id, { routing: 'human_now', bypass_reason: `said "${hit}"` });
         sessions.bus.emit('bypass', { call_id: call.call_id, from_number: call.from_number, reason: hit, now: Date.now() });
         req.log.warn({ call_id: call.call_id, phrase: hit }, 'BYPASS phrase in live transcript');
       }
@@ -128,17 +146,17 @@ app.addHook('onSend', async (req, reply, payload) => {
 const snapshot = () => ({
   active: sessions.active().length,
   sessions: sessions.all(),
-  clusters: clusters.all(),
+  calls: backend.allCalls(),
 });
 
 app.get('/sessions', async () => ({ active: sessions.active().length, sessions: sessions.all() }));
-app.get('/clusters', async () => clusters.all());
+app.get('/calls', async () => backend.allCalls());
 app.get('/state', async () => snapshot());
 app.get('/health', async () => ({ ok: true }));
 
 // Server-sent events: every bus event, live. The console opens one EventSource and never
 // polls. First message is a full snapshot so a reconnect starts from current state.
-const STREAMED = ['signal', 'bypass', 'cluster', 'call_started', 'call_ended', 'call_analyzed'];
+const STREAMED = ['lookup', 'call_logged', 'bypass', 'call_started', 'call_ended', 'call_analyzed'];
 app.get('/events', (req, reply) => {
   reply.hijack();
   reply.raw.writeHead(200, {

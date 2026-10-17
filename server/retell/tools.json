@@ -1,23 +1,58 @@
 [
   {
     "type": "custom",
-    "name": "report_incident",
-    "description": "Call this as soon as you know the incident type and the street. Call again if the caller corrects or adds detail.",
-    "url": "{{PUBLIC_URL}}/fn/report_incident",
+    "name": "lookup_address",
+    "description": "Look up the last recorded status of an address. Call once you have the person's full name and their address.",
+    "url": "{{PUBLIC_URL}}/fn/lookup_address",
     "speak_during_execution": true,
     "speak_after_execution": true,
     "timeout_ms": 8000,
     "parameters": {
       "type": "object",
       "properties": {
-        "incident_type": { "type": "string", "enum": ["flood", "fire", "outage", "medical", "structural", "other"] },
-        "street": { "type": "string", "description": "Street name only, e.g. 'Normandie Ave'. Omit the number." },
-        "cross_street": { "type": "string" },
-        "firsthand": { "type": "boolean", "description": "True if the caller personally saw or is experiencing it. False if relaying what someone else told them." },
-        "people_affected": { "type": "integer" },
-        "lang": { "type": "string", "description": "BCP-47 code of the language the caller is speaking" }
+        "address": { "type": "string", "description": "House number and street, digits not words, e.g. '1420 Sunset Mesa Dr'." },
+        "subject_name": { "type": "string", "description": "First and last name of the person the caller is asking about." }
       },
-      "required": ["incident_type", "street", "firsthand"]
+      "required": ["address", "subject_name"]
+    }
+  },
+  {
+    "type": "custom",
+    "name": "log_call",
+    "description": "Log the call and get the routing decision. Call after lookup_address, or immediately if the caller is with the person now.",
+    "url": "{{PUBLIC_URL}}/fn/log_call",
+    "speak_during_execution": false,
+    "speak_after_execution": true,
+    "timeout_ms": 8000,
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "mode": { "type": "string", "enum": ["wildfire", "routine"] },
+        "address": { "type": "string" },
+        "subject_name": { "type": "string" },
+        "with_them_now": { "type": "boolean", "description": "True if the caller is physically with the person right now." },
+        "emergency": { "type": "boolean", "description": "True if there is any sign of a first-hand emergency." },
+        "caller_update": { "type": "string", "description": "Newer information from the caller that the record may not have, e.g. 'he texted 20 minutes ago, still at home'." },
+        "last_contact_hours": { "type": "number", "description": "Routine mode: hours since the caller last heard from them." },
+        "vulnerability": {
+          "type": "object",
+          "properties": {
+            "age": { "type": "integer" },
+            "lives_alone": { "type": "boolean" },
+            "medical": { "type": "string", "description": "e.g. 'oxygen', 'insulin'. Omit if none." },
+            "mobility": { "type": "boolean", "description": "True if they have trouble getting around." }
+          }
+        },
+        "red_flags": {
+          "type": "object",
+          "properties": {
+            "mail_piling": { "type": "boolean" },
+            "missed_meds": { "type": "boolean" },
+            "fall_history": { "type": "boolean" }
+          }
+        }
+      },
+      "required": ["mode", "address", "subject_name", "with_them_now"]
     }
   },
   {
@@ -31,7 +66,7 @@
     "parameters": {
       "type": "object",
       "properties": {
-        "reason": { "type": "string", "description": "A few words: what the caller said that made this life-safety." }
+        "reason": { "type": "string", "description": "A few words: what the caller said that made this urgent." }
       },
       "required": ["reason"]
     }
@@ -39,13 +74,13 @@
   {
     "type": "transfer_call",
     "name": "transfer_to_human",
-    "description": "Transfer the caller to the human dispatcher.",
+    "description": "Transfer the caller to a human call-taker.",
     "transfer_destination": { "type": "predefined", "number": "{{DISPATCHER_NUMBER}}" },
     "transfer_option": { "type": "warm_transfer" }
   },
   {
     "type": "end_call",
     "name": "end_call",
-    "description": "End the call only after the caller's report is taken and nobody is in danger, or the caller says goodbye."
+    "description": "End the call only after log_call has run, nobody is in danger, and the caller has nothing else."
   }
 ]

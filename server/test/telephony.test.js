@@ -1,63 +1,139 @@
-// npm test. Pure functions only, no network.
+// npm test. No network. The six scripted cases from team_plan.md, plus the safety rules.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { checkBypass, callerText } from '../src/bypass.js';
-import { triage } from '../src/engine-stub.js';
-import * as clusters from '../src/cluster-stub.js';
+import { lookupAddress, logCall, addressKey, nameMatches } from '../src/backend.js';
+import { route, routineScore, FRESH_MIN } from '../src/routing.js';
+import { sayForLookup, sayForRouting } from '../src/speech.js';
 
-const signal = (from, extra = {}) => ({
-  incident_type: 'flood', street: 'Normandie Ave', firsthand: true, from_number: from, ...extra,
+const now = Date.now();
+const wildfire = (address, subject_name, extra = {}) =>
+  ({ mode: 'wildfire', address, subject_name, with_them_now: false, ...extra });
+
+async function run(payload) {
+  const lookup = await lookupAddress(payload);
+  const { row } = await logCall(payload, now);
+  return { lookup, row, say: sayForLookup(lookup, payload.subject_name, now, FRESH_MIN) };
+}
+
+// The six scripted cases
+
+test('case 1 cleared: answered by agent, with the time', async () => {
+  const { row, say } = await run(wildfire('1420 Sunset Mesa Dr', 'Maria Lopez'));
+  assert.equal(row.routing, 'answered_by_agent');
+  assert.match(say, /cleared at \d{1,2}:\d{2} [AP]M, about 40 minutes ago/);
 });
 
-test('bypass fires on a partial utterance, caller side only', () => {
-  assert.equal(checkBypass('my husband is bleeding and'), 'bleeding');
-  assert.equal(checkBypass('mi mamá está atrapada'), 'atrapada');
-  assert.equal(checkBypass('the street is flooded'), null);
-  const call = { transcript: 'Agent: is anyone trapped?\nUser: no, just water' };
-  assert.equal(checkBypass(callerText(call)), null);
+test('case 2 refused: priority queue, officer note goes to the human', async () => {
+  const { row, say } = await run(wildfire('1515 Via de la Paz', 'Harold Kim'));
+  assert.equal(row.routing, 'priority_queue');
+  assert.match(row.reason, /2 adults staying, 1 on oxygen/);
+  assert.match(say, /chose to stay/);
 });
 
-test('first report of an incident is NOVEL and never claims prior reports', () => {
-  const d = triage(signal('+12135550100'), { cluster: null }, 0);
-  assert.equal(d.lane, 'NOVEL');
-  assert.equal(d.transferTo, 'dispatcher');
-  assert.doesNotMatch(d.say, /already|reports of/i);
+test('case 3 unknown inside the perimeter: priority queue', async () => {
+  const { row } = await run(wildfire('16800 Bollinger Drive', 'Ruth Adams'));
+  assert.equal(row.routing, 'priority_queue');
+  assert.match(row.reason, /inside the perimeter/);
 });
 
-test('report on a known incident is CORROBORATING and states count and age', () => {
-  const cluster = { sources: 3, created_at: 0 };
-  const d = triage(signal('+12135550101'), { cluster }, 12 * 60000);
-  assert.equal(d.lane, 'CORROBORATING');
-  assert.match(d.say, /3 reports/);
-  assert.match(d.say, /12 minutes ago/);
-  assert.doesNotMatch(d.say, /safe|on the way|coming/i);
+test('case 4 first-hand emergency: human now, whatever the record says', async () => {
+  const { row } = await run(wildfire('1420 Sunset Mesa Dr', 'Maria Lopez', { with_them_now: true }));
+  assert.equal(row.routing, 'human_now');
+  assert.equal(row.severity, 5);
 });
 
-test('no street means NOVEL (default is escalate)', () => {
-  assert.equal(triage(signal('+1', { street: '' }), { cluster: { sources: 9, created_at: 0 } }, 0).lane, 'NOVEL');
+test('case 5 routine high: grandma, two weeks, 84, alone, oxygen → priority queue', async () => {
+  const { row } = await run({
+    mode: 'routine', address: '4512 Crenshaw Blvd', subject_name: 'Dorothy Hayes', with_them_now: false,
+    last_contact_hours: 336, vulnerability: { age: 84, lives_alone: true, medical: 'oxygen' }, red_flags: { mail_piling: true },
+  });
+  assert.equal(row.routing, 'priority_queue');
+  assert.equal(row.severity, 5);
 });
 
-test('medical is BYPASS regardless of what we know', () => {
-  assert.equal(triage(signal('+1', { incident_type: 'medical' }), { cluster: { sources: 9, created_at: 0 } }, 0).lane, 'BYPASS');
+test('case 6 routine low: six hours, healthy 40-year-old → scheduled follow-up', async () => {
+  const { row } = await run({
+    mode: 'routine', address: '910 N Vermont Ave', subject_name: 'Kevin Nguyen', with_them_now: false,
+    last_contact_hours: 6, vulnerability: { age: 40 }, red_flags: {},
+  });
+  assert.equal(row.routing, 'scheduled_followup');
+  assert.ok(row.severity < 4);
 });
 
-test('server path: first call NOVEL, second call on same street CORROBORATING', () => {
-  const s1 = signal('+12135550200', { street: 'Sunset Blvd' });
-  assert.equal(triage(s1, { cluster: clusters.lookup(s1) }, 0).lane, 'NOVEL');
-  clusters.observe(s1, 0);
-  const s2 = signal('+12135550201', { street: '  sunset  blvd ' });
-  assert.equal(triage(s2, { cluster: clusters.lookup(s2) }, 60000).lane, 'CORROBORATING');
+// Safety rules
+
+test('looting safeguard: wrong name gets no status, time or note', async () => {
+  const l = await lookupAddress({ address: '1515 Via de la Paz', subject_name: 'John Smith' });
+  assert.equal(l.found, true);
+  assert.equal(l.name_match, false);
+  assert.equal(l.status, null);
+  assert.equal(l.recorded_at, null);
+  assert.equal(l.note, null);
+  assert.match(sayForLookup(l, 'John Smith', now, FRESH_MIN), /full name/);
 });
 
-test('independence: one number calling five times is one source', () => {
-  let c;
-  for (let i = 0; i < 5; i++) c = clusters.observe(signal('+12135550300', { street: 'Vermont Ave' }), i);
-  assert.equal(c.sources, 5);
-  assert.equal(c.independent, 1);
+test('first name only is not a match', () => {
+  assert.equal(nameMatches('Maria Lopez', 'Maria'), false);
+  assert.equal(nameMatches('Maria Lopez', 'my mom maria lopez'), true);
 });
 
-test('independence: secondhand reports do not count', () => {
-  let c;
-  for (let i = 0; i < 4; i++) c = clusters.observe(signal(`+1213555040${i}`, { street: 'Western Ave', firsthand: false }), i);
-  assert.equal(c.independent, 0);
+test('stale cleared (6 hours) is not answered by the agent, and says it may be out of date', async () => {
+  const { row, say } = await run(wildfire('1100 Palisades Dr', 'Tom Becker'));
+  assert.equal(row.routing, 'priority_queue');
+  assert.match(say, /about 6 hours ago/);
+  assert.match(say, /may not reflect/);
+});
+
+test('new information beats the record', async () => {
+  const { row } = await run(wildfire('1420 Sunset Mesa Dr', 'Maria Lopez', { caller_update: 'she texted 20 minutes ago, still home' }));
+  assert.equal(row.routing, 'priority_queue');
+});
+
+test('address not on record defaults to escalate', async () => {
+  const { row, lookup } = await run(wildfire('1 Nowhere St', 'Jane Doe'));
+  assert.equal(lookup.found, false);
+  assert.equal(row.routing, 'priority_queue');
+});
+
+test('nothing the agent reads ever says empty, safe, or help is coming', async () => {
+  const lines = [...Object.values(sayForRouting)];
+  for (const [address, name] of [['1420 Sunset Mesa Dr', 'Maria Lopez'], ['1515 Via de la Paz', 'Harold Kim'],
+    ['16800 Bollinger Dr', 'Ruth Adams'], ['1100 Palisades Dr', 'Tom Becker'], ['820 Chautauqua Blvd', 'Linda Park'],
+    ['1515 Via de la Paz', 'Wrong Person'], ['1 Nowhere St', 'X Y']]) {
+    lines.push(sayForLookup(await lookupAddress({ address, subject_name: name }), name, now, FRESH_MIN));
+  }
+  for (const l of lines) assert.doesNotMatch(l, /\bempty\b|\bsafe\b|on the way|help is coming|no one (is )?(there|home)/i, l);
+});
+
+test('every status the agent states carries its time', async () => {
+  for (const [address, name] of [['1420 Sunset Mesa Dr', 'Maria Lopez'], ['1515 Via de la Paz', 'Harold Kim'],
+    ['1100 Palisades Dr', 'Tom Becker'], ['820 Chautauqua Blvd', 'Linda Park']]) {
+    assert.match(sayForLookup(await lookupAddress({ address, subject_name: name }), name, now, FRESH_MIN), /\d{1,2}:\d{2} [AP]M/);
+  }
+});
+
+test('address matching tolerates spoken forms', () => {
+  assert.equal(addressKey('1420 Sunset Mesa Drive'), addressKey('1420 sunset mesa dr.'));
+  assert.equal(addressKey('910 North Vermont Avenue'), addressKey('910 N Vermont Ave'));
+  assert.notEqual(addressKey('1421 Sunset Mesa Dr'), addressKey('1420 Sunset Mesa Dr'));
+});
+
+test('routine score: vulnerability capped at +2, red flags add, capped at 5', () => {
+  assert.equal(routineScore({ last_contact_hours: 6 }), 1);
+  assert.equal(routineScore({ last_contact_hours: 6, vulnerability: { age: 90, lives_alone: true, medical: 'x', mobility: true } }), 3);
+  assert.equal(routineScore({ last_contact_hours: 400, vulnerability: { age: 90 }, red_flags: { a: true, b: true } }), 5);
+});
+
+test('emergency words in the live transcript, caller side only', () => {
+  assert.equal(checkBypass('my dad is trapped and'), 'trapped');
+  assert.equal(checkBypass('the street is fine'), null);
+  // A condition is a vulnerability, not an emergency in progress.
+  assert.equal(checkBypass("she's 84, lives alone, on oxygen"), null);
+  assert.equal(checkBypass(callerText({ transcript: 'Agent: is anyone trapped?\nUser: no' })), null);
+});
+
+test('emergency overrides a fresh cleared record', () => {
+  const lookup = { found: true, name_match: true, status: 'cleared', recorded_at: new Date(now - 5 * 60000).toISOString(), inside_perimeter: true };
+  assert.equal(route({ mode: 'wildfire', emergency: true }, lookup, now).routing, 'human_now');
 });

@@ -1,36 +1,38 @@
-# Telephony server (Person A)
+# Voice agent server (P1)
 
-Everything between a phone ringing and `engine.triage()` returning. **Inbound calls only.**
+Retell's Line Intake agent calls this server mid-call. It answers "was my mom's house
+checked?" from the sweep log, and routes everything else to a human. **Inbound only.**
+Contract: `docs/DATA_CONTRACT.md`.
 
-    src/index.js         Fastify: /fn/report_incident, /fn/request_human, /webhook/retell, /events
-    src/engine-stub.js   Lanes on the frozen contract. Replace with Person B's engine.
-    src/cluster-stub.js  What we already know per incident type + street. Replace with B's clustering.
-    src/bypass.js        Keyword check on the live transcript, every chunk.
-    src/sessions.js      Live call state by call_id, plus the event bus.
-    retell/              Line Intake prompt and tool definitions.
-    scripts/             simulate.js (fake signed Retell calls), setup-retell.js (agent as code).
+    src/index.js     Fastify: /fn/lookup_address, /fn/log_call, /fn/request_human, /webhook/retell, /events
+    src/backend.js   lookup_address + log_call. FAKE data until P2's Supabase functions are live.
+    src/routing.js   Routing rules (contract §3). Pure, time injected.
+    src/speech.js    What the agent reads out: always the time, never "empty".
+    src/bypass.js    Emergency words in the live transcript, every chunk.
+    src/sessions.js  Live call state by call_id, plus the event bus.
+    retell/          Line Intake prompt (wildfire + routine modes) and tool definitions.
+    scripts/         simulate.js (the six scripted calls), setup-retell.js (agent as code).
 
-## How a call is answered
+## The six scripted calls (team_plan.md)
 
-1. Agent greets: *"LA Community Line. I'm automated, and I can get you a person. Is anyone hurt or in danger?"*
-2. Every transcript chunk runs `checkBypass()`. A life-safety phrase flags the session mid-sentence.
-3. Once the agent has incident type + street it calls `report_incident`. The server looks up
-   what we already know, runs `triage()`, and replies before doing anything else:
+| Case | Fake address / name | Routing |
+|---|---|---|
+| Cleared 40 min ago | 1420 Sunset Mesa Dr / Maria Lopez | `answered_by_agent`, with the time |
+| Refused | 1515 Via de la Paz / Harold Kim | `priority_queue`, officer note to the human |
+| Unknown inside perimeter | 16800 Bollinger Dr / Ruth Adams | `priority_queue` |
+| First-hand emergency | any, "I'm with her now" | `human_now` |
+| Routine high | 4512 Crenshaw Blvd / Dorothy Hayes, 2 weeks, 84, oxygen | `priority_queue` |
+| Routine low | 910 N Vermont Ave / Kevin Nguyen, 6 hours, 40 | `scheduled_followup` |
 
-| What we know | Lane | Caller hears | Transfer |
-|---|---|---|---|
-| `medical` | BYPASS | "I'm connecting you to a person right now." | yes |
-| No street, or first report of this incident | NOVEL | "This is the first report we have of this. I'm connecting you to a dispatcher." | yes |
-| Incident already on record | CORROBORATING | "We've had N reports … the first about M minutes ago, and yours has been added." | no |
-
-4. After replying, the report is recorded: sources, plus independent callers (unique, firsthand only).
+Also in the fake data: 1100 Palisades Dr / Tom Becker (cleared 6 hours ago, stale) and
+820 Chautauqua Blvd / Linda Park (self-reported out 55 min ago).
+A wrong name gets no status at all: the looting safeguard.
 
 ## Run it locally
 
     cd server && npm install && npm run dev
-    npm run simulate                 # NOVEL the first time, CORROBORATING after
-    npm run simulate -- medical      # BYPASS, flagged mid-utterance
-    npm run simulate -- surge        # 1 first report, then 6 concurrent on the same street
+    npm run simulate                 # all six cases
+    npm run simulate -- refused      # one case
     npm test
 
 Fill in `server/.env` (copied from `.env.example`). `RETELL_API_KEY` signs simulated
@@ -46,7 +48,7 @@ this repo, so deploy explicitly after pushing:
 
 Every deploy restarts the server and clears in-memory state. Never deploy mid-demo.
 
-    npm run simulate -- surge --url https://usc-dual-hacks-production.up.railway.app
+    npm run simulate -- --url https://usc-dual-hacks-production.up.railway.app
 
 ## Retell setup
 
@@ -57,11 +59,11 @@ The agent config lives in `retell/`, not the dashboard:
 Updates **Line Intake** (Claude 5.5 Haiku, multilingual, 5 min max, 20s silence cutoff),
 points its webhook and tools at the URL, and binds it to the number with outbound
 disabled. **Re-run it whenever the prompt changes.** Set `DISPATCHER_NUMBER` first or
-BYPASS/NOVEL calls have nowhere to transfer.
+`human_now` / `priority_queue` calls have nowhere to transfer.
 
 ## Checkpoint
 
-Phone rings → `report_incident` hits the server → lane comes back and the agent says it.
+Phone rings → `lookup_address` and `log_call` hit the server → the agent reads the status and routing.
 **Compare the first real body in the Railway logs to what `src/index.js` reads**
 (`call.call_id`, `call.from_number`, `args.*`) and fix the code if it differs.
 
@@ -70,19 +72,19 @@ Phone rings → `report_incident` hits the server → lane comes back and the ag
 A custom function's response only goes back to the agent's LLM; returning
 `{ transfer: true }` does not move the call. The real transfer is Retell's built-in
 `transfer_to_human` tool, which the prompt tells the agent to call after `request_human`
-or on a `BYPASS`/`NOVEL` lane.
+or when `log_call` returns `transfer: true`.
 
 ## Console feed
 
-    GET /events    server-sent events: snapshot, signal, bypass, cluster, call_started,
+    GET /events    server-sent events: snapshot, lookup, call_logged, bypass, call_started,
                    call_ended. One EventSource, no polling.
-    GET /state     everything at once: sessions, clusters
-    GET /sessions  GET /clusters
+    GET /state     everything at once: sessions, calls
+    GET /sessions  GET /calls
 
 ```js
 const es = new EventSource('https://usc-dual-hacks-production.up.railway.app/events');
 es.addEventListener('snapshot', (e) => render(JSON.parse(e.data)));
-es.addEventListener('signal', (e) => addCall(JSON.parse(e.data)));
+es.addEventListener('call_logged', (e) => addToQueue(JSON.parse(e.data)));
 ```
 
 ## Outbound

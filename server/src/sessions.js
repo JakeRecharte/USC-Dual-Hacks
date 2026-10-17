@@ -1,25 +1,19 @@
-// Live call state keyed by Retell call_id. Feeds the console's live-calls panel and the
-// concurrent-sessions count. In memory on purpose; Supabase persistence is Person B's.
+// Live call state keyed by Retell call_id: who they're asking about, the lookup, the routing.
+// Feeds the board's live-calls panel. In memory on purpose; durable rows are P2's `calls`.
 import { EventEmitter } from 'node:events';
 
-// One bus, two sources: real Retell traffic and the synthetic generator both emit here.
+// One bus, two sources: real Retell traffic and simulated calls both emit here.
 export const bus = new EventEmitter();
 
 const sessions = new Map();
 
 export function upsert(callId, patch) {
-  const s = sessions.get(callId) || { call_id: callId, signals: [], lane: null, ended_at: null };
+  const s = sessions.get(callId) || { call_id: callId, routing: null, ended_at: null };
   Object.assign(s, patch);
   sessions.set(callId, s);
   return s;
 }
 
-export function addSignal(callId, signal, decision) {
-  const s = upsert(callId, {});
-  s.signals.push({ ...signal, lane: decision.lane });
-  s.lane = decision.lane;
-  return s;
-}
-
+export const get = (callId) => sessions.get(callId);
 export const all = () => [...sessions.values()];
 export const active = () => all().filter((s) => !s.ended_at);
