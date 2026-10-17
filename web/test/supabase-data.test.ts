@@ -9,8 +9,8 @@ import { joinRows } from '../src/lib/supabase-data.ts';
 const address = (over: Record<string, unknown> = {}) => ({
   id: 'a1',
   address: '1420 Sunset Mesa Dr',
-  lat: 34.0376,
-  lng: -118.5793,
+  lat: 34.04026,
+  lng: -118.57998,
   zone_id: 'PAC-1',
   resident_name: 'Maria Lopez',
   ...over,
@@ -18,7 +18,8 @@ const address = (over: Record<string, unknown> = {}) => ({
 
 describe('perimeter test', () => {
   it('places the scripted inside addresses inside', () => {
-    assert.equal(pointInPolygon([34.0376, -118.5793], PERIMETER), true, '1420 Sunset Mesa');
+    // Where docs/seed.sql puts her. The rough 34.0376, -118.5793 in addresses.ts is offshore.
+    assert.equal(pointInPolygon([34.04026, -118.57998], PERIMETER), true, '1420 Sunset Mesa');
     assert.equal(pointInPolygon([34.0447, -118.5266], PERIMETER), true, '1515 Via de la Paz');
     assert.equal(pointInPolygon([34.0607, -118.5437], PERIMETER), true, '1100 Palisades Dr');
   });

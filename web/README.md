@@ -16,7 +16,7 @@ printed on the sign-in screen outside production.
 |---|---|---|
 | `/` | — | Passcode sign-in, one code per role |
 | `/officer` | officers | Assigned addresses by zone, three status buttons per door |
-| `/dispatch` | dispatchers | Priority heatmap, live call queue, door-knock list |
+| `/dispatch` | dispatchers | Building status map, live call queue, door-knock list |
 
 ## Two modes, and why
 
