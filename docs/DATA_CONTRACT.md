@@ -83,7 +83,7 @@ Evaluated top to bottom; first match wins. **Severity only moves a call up. No c
 | # | Condition | Routing | Severity |
 |---|---|---|---|
 | 1 | `with_them_now` or `emergency` | `human_now` | 5 |
-| 2 | `caller_update` present (new info beats the record) | `priority_queue` | 4 |
+| 2 | `reported_status` present (a concrete report of where they are beats the record; free-text `caller_update` alone only goes in `reason`) | `priority_queue` | 4 |
 | 3 | `status = refused` | `priority_queue` | 4 |
 | 4 | `status = unknown` / `no_answer` / null, inside perimeter | `priority_queue` | 4 |
 | 5 | `status ∈ {cleared, self_out}` and `recorded_at` within **120 min** | `answered_by_agent` | 1 |

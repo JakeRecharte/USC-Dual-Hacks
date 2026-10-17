@@ -95,6 +95,38 @@ export function addressKey(s) {
   return street.length ? `${number} ${street.join(' ')}` : null;
 }
 
+// Speech recognition mishears street names ("Via de la Paz" → "Villa de la Paz" on a real
+// call; "Sunset Mesa" → "Sunset Message"). The house number almost always survives, so when
+// the exact key misses, look only at houses with that number and take the one the caller
+// named, or else the one whose street is a single slip away. Status is still name-gated.
+function levenshtein(a, b) {
+  const d = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)]);
+  for (let j = 1; j <= b.length; j++) d[0][j] = j;
+  for (let i = 1; i <= a.length; i++) {
+    for (let j = 1; j <= b.length; j++) {
+      d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    }
+  }
+  return d[a.length][b.length];
+}
+const similarity = (a, b) => 1 - levenshtein(a, b) / Math.max(a.length, b.length, 1);
+
+export function findHousehold(rows, address, subject_name) {
+  const key = addressKey(address);
+  if (!key) return null;
+  const exact = rows.find((r) => addressKey(r.address) === key);
+  if (exact) return exact;
+  const [number, ...said] = key.split(' ');
+  const sameNumber = rows.filter((r) => addressKey(r.address)?.split(' ')[0] === number);
+  const named = sameNumber.filter((r) => nameMatches(r.resident_name, subject_name));
+  if (named.length === 1) return named[0];
+  const close = sameNumber
+    .map((r) => ({ r, score: similarity(said.join(' '), addressKey(r.address).split(' ').slice(1).join(' ')) }))
+    .filter((x) => x.score >= 0.75)
+    .sort((a, b) => b.score - a.score);
+  return close.length === 1 || (close.length > 1 && close[0].score > close[1].score) ? close[0].r : null;
+}
+
 // The record's first name plus at least one other of its names. Accents, hyphens and
 // apostrophes don't matter: "María López-García" matches "Maria Lopez", "obrien" "O'Brien".
 export function nameMatches(resident, subject) {
@@ -138,20 +170,19 @@ function fakeLatest(row, now) {
   return !seeded || Date.parse(reported.recorded_at) > Date.parse(seeded.recorded_at) ? reported : seeded;
 }
 
-function lookupFake(key, subject_name, now) {
-  const row = FAKE_ADDRESSES.find((a) => addressKey(a.address) === key);
+function lookupFake(address, subject_name, now) {
+  const row = findHousehold(FAKE_ADDRESSES, address, subject_name);
   if (!row) return NOT_FOUND;
   return answer(row, fakeLatest(row, now), subject_name);
 }
 
 // The true newest status, regardless of who's asking. Server-side only (deciding whether a
 // phone report may be written); never returned to the agent.
-async function currentStatus(address, now) {
-  const key = addressKey(address);
-  if (!key) return null;
+async function currentStatus(address, now, subject_name) {
+  if (!addressKey(address)) return null;
   if (db) {
     try {
-      const row = (await dbHouseholds(now)).find((a) => addressKey(a.address) === key);
+      const row = findHousehold(await dbHouseholds(now), address, subject_name);
       if (!row) return null;
       const { data, error } = await db.from('status_log').select('status').eq('address_id', row.id)
         .order('recorded_at', { ascending: false }).limit(1);
@@ -159,7 +190,7 @@ async function currentStatus(address, now) {
       return { address_id: row.id, status: data[0]?.status ?? 'unknown' };
     } catch (err) { dbFailed('current status', err); }
   }
-  const row = FAKE_ADDRESSES.find((a) => addressKey(a.address) === key);
+  const row = findHousehold(FAKE_ADDRESSES, address, subject_name);
   return row ? { address_id: row.id, status: fakeLatest(row, now)?.status ?? 'unknown' } : null;
 }
 
@@ -184,8 +215,8 @@ async function dbHouseholds(now) {
   return households.rows;
 }
 
-async function lookupDb(key, subject_name, now) {
-  const row = (await dbHouseholds(now)).find((a) => addressKey(a.address) === key);
+async function lookupDb(address, subject_name, now) {
+  const row = findHousehold(await dbHouseholds(now), address, subject_name);
   if (!row) return NOT_FOUND;
   const { data, error } = await db.from('status_log')
     .select('status, source, note, recorded_at')
@@ -200,10 +231,10 @@ export async function lookupAddress({ address, subject_name }, now = Date.now())
   const key = addressKey(address);
   if (!key) return NOT_FOUND;
   if (db) {
-    try { return await lookupDb(key, subject_name, now); }
+    try { return await lookupDb(address, subject_name, now); }
     catch (err) { dbFailed('lookup_address', err); }
   }
-  return lookupFake(key, subject_name, now);
+  return lookupFake(address, subject_name, now);
 }
 
 // One row per call (keyed by Retell's call_id). Within a call the routing only moves up:
@@ -275,7 +306,7 @@ export async function logCall(payload, now) {
   // What the caller told us goes back into the sweep log, if it's allowed to (reports.js).
   let report_written = null;
   if (payload.reported_status) {
-    const report = callReport(payload, await currentStatus(payload.address, now), now);
+    const report = callReport(payload, await currentStatus(payload.address, now, payload.subject_name), now);
     if (report && !report.skip) {
       await writeReport(report, now);
       report_written = report.status;

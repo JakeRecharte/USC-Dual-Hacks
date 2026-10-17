@@ -90,9 +90,17 @@ test('stale cleared (6 hours) is not answered by the agent, and says it may be o
   assert.match(say, /may not reflect/);
 });
 
-test('new information beats the record', async () => {
-  const { row } = await run(wildfire('1420 Sunset Mesa Dr', 'Maria Lopez', { caller_update: 'she texted 20 minutes ago, still home' }));
-  assert.equal(row.routing, 'priority_queue');
+test('new information beats the record: a report of where they are', async () => {
+  // Pure routing: run() would also write the report and change Maria's record for later tests.
+  const lookup = await lookupAddress({ address: '1420 Sunset Mesa Dr', subject_name: 'Maria Lopez' }, now);
+  assert.equal(route({ mode: 'wildfire', caller_update: 'she texted 20 minutes ago, still home', reported_status: 'staying' }, lookup, now).routing, 'priority_queue');
+});
+
+test('real call 10:25: "no, nothing newer" in caller_update does not escalate a fresh cleared', async () => {
+  const { row } = await run(wildfire('1420 Sunset Mesa Dr', 'Maria Lopez',
+    { caller_update: 'Caller has not heard from her since the officer check. Caller is not with her.' }));
+  assert.equal(row.routing, 'answered_by_agent');
+  assert.match(row.reason, /caller says: Caller has not heard/);
 });
 
 test('address not on record defaults to escalate', async () => {
@@ -273,7 +281,7 @@ test('G2: a failed transfer becomes the top-priority callback and is never downg
 test('G4: log_call twice in one call is one row, routing only moves up', async () => {
   await logCall({ ...base('g4', '+13105550004'), address: '1420 Sunset Mesa Dr', subject_name: 'Maria Lopez' }, now);
   assert.equal(getCall('g4').routing, 'answered_by_agent');
-  await logCall({ ...base('g4', '+13105550004'), address: '1420 Sunset Mesa Dr', subject_name: 'Maria Lopez', caller_update: 'she texted, still home' }, now);
+  await logCall({ ...base('g4', '+13105550004'), address: '1420 Sunset Mesa Dr', subject_name: 'Maria Lopez', caller_update: 'she texted, still home', reported_status: 'staying' }, now);
   assert.equal(getCall('g4').routing, 'priority_queue');
   await logCall({ ...base('g4', '+13105550004'), address: '1420 Sunset Mesa Dr', subject_name: 'Maria Lopez' }, now);
   assert.equal(getCall('g4').routing, 'priority_queue');
@@ -351,4 +359,24 @@ test('C: resident says out but the house is marked staying: a person checks, rec
   assert.equal(row.report_written, null);
   assert.match(row.reason, /not recorded/);
   assert.equal((await lookupAddress({ address: '1515 Via de la Paz', subject_name: 'Harold Kim' }, now)).status, 'refused');
+});
+
+// ── Real-call fixes (Retell call log, 10:25) ──
+
+test('ASR street slips still find the house: "Villa de la Paz", "Sunset Message"', async () => {
+  const harold = await lookupAddress({ address: '1515 Villa de la Paz', subject_name: 'Harold Kim' }, now);
+  assert.equal(harold.found, true);
+  assert.equal(harold.status, 'refused');
+  const maria = await lookupAddress({ address: '1420 Sunset Message Drive', subject_name: 'Maria Lopez' }, now);
+  assert.equal(maria.found, true);
+});
+
+test('fuzzy match is still name-gated and never jumps to a different house number', async () => {
+  const wrongName = await lookupAddress({ address: '1515 Villa de la Paz', subject_name: 'John Smith' }, now);
+  assert.equal(wrongName.found, true);
+  assert.equal(wrongName.status, null);
+  const wrongNumber = await lookupAddress({ address: '1516 Via de la Paz', subject_name: 'Harold Kim' }, now);
+  assert.equal(wrongNumber.found, false);
+  const unrelated = await lookupAddress({ address: '1515 Main St', subject_name: 'John Smith' }, now);
+  assert.equal(unrelated.found, false);
 });

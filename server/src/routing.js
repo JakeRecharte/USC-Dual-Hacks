@@ -24,7 +24,10 @@ export function route(call, lookup, now) {
   if (call.caller_state === 'distressed' && ['answered_by_agent', 'scheduled_followup'].includes(d.routing)) {
     d = { routing: 'priority_queue', severity: Math.max(d.severity, 4), reason: `${d.reason}; caller distressed` };
   }
-  return repeatCallers(d, call.prior_callers || 0);
+  d = repeatCallers(d, call.prior_callers || 0);
+  // Anything else the caller said still reaches the call-taker, it just doesn't route.
+  if (call.caller_update && !d.reason.includes(call.caller_update)) d = { ...d, reason: `${d.reason}; caller says: ${call.caller_update}` };
+  return d;
 }
 
 // Other people already called about this address. A fresh "cleared" still answers them;
@@ -56,8 +59,12 @@ function routeOnFacts(call, lookup, now) {
       ? { routing: 'priority_queue', severity: 4, reason: 'resident called to say out, but the house is marked staying' }
       : { routing: 'answered_by_agent', severity: 1, reason: 'resident called: out of the area' };
   }
-  if (call.caller_update) {
-    return { routing: 'priority_queue', severity: 4, reason: `caller update: ${call.caller_update}` };
+  // New information beats the record, but only a concrete report of where the person is.
+  // Free text alone doesn't escalate: on a real call the agent wrote "caller has not heard
+  // from her since the officer check" into caller_update and a fresh "cleared" got queued.
+  if (call.reported_status) {
+    return { routing: 'priority_queue', severity: 4,
+      reason: `caller report: ${call.reported_status}${call.caller_update ? ` (${call.caller_update})` : ''}` };
   }
   // Order is docs/DATA_CONTRACT.md §3, top to bottom.
   if (status === 'refused') {

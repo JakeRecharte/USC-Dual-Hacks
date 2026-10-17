@@ -44,6 +44,20 @@ async function tools(base) {
   return all.filter((t) => t.type !== 'transfer_call');
 }
 
+// From the same addresses the agent looks up (Supabase if configured, else the fake data).
+async function keywords() {
+  const { db } = await import('../src/db.js');
+  let rows = [];
+  if (db) {
+    const { data, error } = await db.from('addresses').select('address, resident_name');
+    if (!error) rows = data;
+  }
+  if (!rows.length) rows = [{ address: '1420 Sunset Mesa Dr', resident_name: 'Maria Lopez' }, { address: '1515 Via de la Paz', resident_name: 'Harold Kim' }];
+  const streets = rows.map((r) => r.address.replace(/^\d+\s+/, ''));
+  const names = rows.map((r) => r.resident_name);
+  return [...new Set([...streets, ...names])].slice(0, 100);
+}
+
 async function findAgent(name) {
   const res = await retell.agent.list({ limit: 1000 });
   const items = Array.isArray(res) ? res : res.items || [];
@@ -71,7 +85,12 @@ async function upsertAgent({ name, prompt, toolList, beginMessage, startSpeaker,
     max_call_duration_ms: 10 * 60 * 1000,
     // A caller who goes quiet may be crying. Retell's default is 10 min; 60s still ends dead lines.
     end_call_after_silence_ms: 60 * 1000,
-    interruption_sensitivity: 1, // barge-in is part of the demo
+    // Barge-in is part of the demo, but at 1.0 background noise cut the greeting off in 3 of
+    // the first 6 real calls.
+    interruption_sensitivity: 0.8,
+    denoising_mode: 'noise-and-background-speech-cancellation',
+    // Street and resident names the recognizer otherwise mishears ("Via" → "Villa").
+    boosted_keywords: await keywords(),
   };
 
   const existing = await findAgent(name);
