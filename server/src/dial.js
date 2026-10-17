@@ -39,7 +39,7 @@ export async function dialBatch(targets, { name = 'sweep' } = {}) {
 
   for (const t of capped) {
     const reason = blockedReason(t.to);
-    if (reason) results.push({ simulated: true, reason, number: t.to, vars: t.vars });
+    if (reason) results.push({ simulated: true, reason, number: t.to, vars: t.vars, why: t.reason });
     else real.push(t);
   }
 
@@ -54,7 +54,7 @@ export async function dialBatch(targets, { name = 'sweep' } = {}) {
       })),
     });
     for (const t of real) {
-      results.push({ simulated: false, number: t.to, vars: t.vars, batch_call_id: batch.batch_call_id });
+      results.push({ simulated: false, number: t.to, vars: t.vars, why: t.reason, batch_call_id: batch.batch_call_id });
     }
   }
 

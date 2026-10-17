@@ -59,9 +59,37 @@ A custom function's response only goes back to the agent's LLM; returning
 `transfer_to_human` tool, which the prompt tells the agent to call after `request_human`
 or on a `BYPASS`/`NOVEL` lane.
 
+## Fan-out (threshold → outbound sweep)
+
+After each `report_incident` reply, `cluster-stub.js` counts unique firsthand callers per
+incident type + street. At `ALERT_THRESHOLD` (5) it calls `fanOut()` once, guarded by
+`latch.js`. Targets come from `targets-stub.js`: consented phones first, then synthetic
+555-01XX residents that only ever come back `simulated`.
+
+`cluster-stub.js`, `targets-stub.js` and the in-memory `latch.js` are stand-ins for Person B's
+engine and Supabase. Each is one function to swap.
+
+    npm run simulate -- surge                      # 7 callers at once → 1 alert, 25 dials
+    npm run simulate -- surge --url https://usc-dual-hacks-production.up.railway.app
+    npm test                                       # allowlist, kill switch, bypass, independence, latch
+
+## Console feed
+
+    GET /events    server-sent events: snapshot, signal, bypass, cluster, alert, dial, sweep,
+                   call_started, call_ended. One EventSource, no polling.
+    GET /state     everything at once: sessions, clusters, dials
+    GET /sessions  GET /clusters  GET /dials
+
+```js
+const es = new EventSource('https://usc-dual-hacks-production.up.railway.app/events');
+es.addEventListener('snapshot', (e) => render(JSON.parse(e.data)));
+es.addEventListener('dial', (e) => addDial(JSON.parse(e.data)));
+```
+
 ## Outbound
 
 Nothing rings unless the number is in `CONSENTED_NUMBERS` **and** `ALERTS_ENABLED=true`.
-Everything else comes back `{ simulated: true, reason }`.
+Everything else comes back `{ simulated: true, reason }`. Entries take an optional
+language: `CONSENTED_NUMBERS=+13105551234:es-ES,+13105555678`.
 
     npm run test-outbound -- +1YOURPHONE

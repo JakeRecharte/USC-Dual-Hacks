@@ -5,6 +5,9 @@ import { config } from './config.js';
 import { triage } from './engine-stub.js';
 import { checkBypass, callerText } from './bypass.js';
 import * as sessions from './sessions.js';
+import * as clusters from './cluster-stub.js';
+import { targetOutbound } from './targets-stub.js';
+import { fanOut, allDials } from './fanout.js';
 
 const app = Fastify({ logger: { level: 'info' } });
 
@@ -64,6 +67,16 @@ app.post('/fn/report_incident', { preHandler: verifyRetell }, async (req, reply)
     sessions.addSignal(signal.call_id, signal, decision);
     sessions.bus.emit('signal', { signal, decision, now, simulated: Boolean(call.simulated) });
     req.log.info({ call_id: signal.call_id, lane: decision.lane, signal }, 'triaged');
+
+    // Threshold check runs after the caller already has their answer.
+    const seen = clusters.observe(signal, now);
+    if (!seen) return;
+    sessions.bus.emit('cluster', { ...clusters.all().find((c) => c.id === seen.cluster.id) });
+    if (seen.confirmed) {
+      fanOut(seen.cluster, targetOutbound(seen.cluster), now)
+        .then((summary) => summary && req.log.warn({ summary }, 'ALERT fan-out'))
+        .catch((err) => req.log.error({ err }, 'fan-out failed'));
+    }
   });
 });
 
@@ -112,9 +125,50 @@ app.post('/webhook/retell', { preHandler: verifyRetell }, async (req, reply) => 
   });
 });
 
-// For the console until Supabase Realtime is wired up.
+// Read side for the console until Supabase Realtime is wired up. Read-only, so open CORS.
+app.addHook('onSend', async (req, reply, payload) => {
+  if (req.method === 'GET') reply.header('access-control-allow-origin', '*');
+  return payload;
+});
+
+const snapshot = () => ({
+  active: sessions.active().length,
+  sessions: sessions.all(),
+  clusters: clusters.all(),
+  dials: allDials(),
+});
+
 app.get('/sessions', async () => ({ active: sessions.active().length, sessions: sessions.all() }));
+app.get('/clusters', async () => clusters.all());
+app.get('/dials', async () => allDials());
+app.get('/state', async () => snapshot());
 app.get('/health', async () => ({ ok: true }));
+
+// Server-sent events: every bus event, live. The console opens one EventSource and never
+// polls. First message is a full snapshot so a reconnect starts from current state.
+const STREAMED = ['signal', 'bypass', 'cluster', 'alert', 'dial', 'sweep', 'call_started', 'call_ended', 'call_analyzed'];
+app.get('/events', (req, reply) => {
+  reply.hijack();
+  reply.raw.writeHead(200, {
+    'content-type': 'text/event-stream',
+    'cache-control': 'no-cache',
+    connection: 'keep-alive',
+    'access-control-allow-origin': '*',
+  });
+  const send = (type, data) => reply.raw.write(`event: ${type}\ndata: ${JSON.stringify(data)}\n\n`);
+  send('snapshot', snapshot());
+
+  const handlers = STREAMED.map((type) => [type, (data) => send(type, data)]);
+  for (const [type, fn] of handlers) sessions.bus.on(type, fn);
+  // Proxies (Railway's included) drop idle streams; a comment line every 15s keeps it open.
+  const ping = setInterval(() => reply.raw.write(': ping\n\n'), 15000);
+
+  req.raw.on('close', () => {
+    clearInterval(ping);
+    for (const [type, fn] of handlers) sessions.bus.off(type, fn);
+  });
+});
+sessions.bus.setMaxListeners(100);
 
 if (!config.retellApiKey) app.log.warn('RETELL_API_KEY not set: signed requests will be rejected');
 if (!config.verifySignatures) app.log.warn('RETELL_VERIFY=false: signature checks are OFF');
