@@ -371,12 +371,13 @@ test('ASR street slips still find the house: "Villa de la Paz", "Sunset Message"
   assert.equal(maria.found, true);
 });
 
-test('fuzzy match is still name-gated and never jumps to a different house number', async () => {
+test('fuzzy match is still name-gated; a different number needs the right name', async () => {
   const wrongName = await lookupAddress({ address: '1515 Villa de la Paz', subject_name: 'John Smith' }, now);
   assert.equal(wrongName.found, true);
   assert.equal(wrongName.status, null);
-  const wrongNumber = await lookupAddress({ address: '1516 Via de la Paz', subject_name: 'Harold Kim' }, now);
-  assert.equal(wrongNumber.found, false);
+  // A misheard number on the right street with the right name is the same household.
+  assert.equal((await lookupAddress({ address: '1516 Via de la Paz', subject_name: 'Harold Kim' }, now)).found, true);
+  assert.equal((await lookupAddress({ address: '1516 Via de la Paz', subject_name: 'John Smith' }, now)).found, false);
   const unrelated = await lookupAddress({ address: '1515 Main St', subject_name: 'John Smith' }, now);
   assert.equal(unrelated.found, false);
 });

@@ -44,9 +44,11 @@ function routeOnFacts(call, lookup, now) {
   const status = lookup?.name_match ? lookup.status : null;
   const ageMin = lookup?.recorded_at ? (now - Date.parse(lookup.recorded_at)) / 60000 : Infinity;
 
-  if (call.with_them_now || call.emergency) {
+  // A resident calling about themselves is "with them"; their own rules below say what that means.
+  const withThem = call.with_them_now && call.reported_by !== 'resident';
+  if (withThem || call.emergency) {
     return { routing: 'human_now', severity: 5,
-      reason: call.with_them_now ? 'caller is with them now' : (call.emergency_reason || 'emergency') };
+      reason: withThem ? 'caller is with them now' : (call.emergency_reason || 'emergency') };
   }
   // The resident calling about themselves is a first-hand report.
   if (call.reported_by === 'resident' && call.reported_status === 'staying') {
