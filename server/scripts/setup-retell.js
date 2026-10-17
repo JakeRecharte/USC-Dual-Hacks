@@ -51,7 +51,8 @@ async function keywords() {
   const { db } = await import('../src/db.js');
   let rows = [];
   if (db) {
-    const { data, error } = await db.from('addresses').select('address, resident_name');
+    // Up to 1,000 rows per request is plenty here: we only keep 100 keywords.
+    const { data, error } = await db.from('addresses').select('address, resident_name').order('id').limit(1000);
     if (!error) rows = data;
   }
   if (!rows.length) rows = [{ address: '1420 Sunset Mesa Dr', resident_name: 'Maria Lopez' }, { address: '1515 Via de la Paz', resident_name: 'Harold Kim' }];

@@ -270,8 +270,15 @@ async function writeReport(report, now) {
 let households = { at: 0, rows: null };
 async function dbHouseholds(now) {
   if (households.rows && now - households.at < 30_000) return households.rows;
-  const { data, error } = await db.from('addresses').select('id, address, lat, lng, resident_name');
-  if (error) throw error;
+  // Supabase returns at most 1,000 rows per request; the seed has ~2,000. Page through all of
+  // them (a single read missed half the households, which then looked "not in our records").
+  const data = [];
+  for (let from = 0; ; from += 1000) {
+    const page = await db.from('addresses').select('id, address, lat, lng, resident_name').order('id').range(from, from + 999);
+    if (page.error) throw page.error;
+    data.push(...page.data);
+    if (page.data.length < 1000) break;
+  }
   households = { at: now, rows: data.map((r) => ({ ...r, inside_perimeter: pointInPolygon([Number(r.lat), Number(r.lng)]) })) };
   return households.rows;
 }
