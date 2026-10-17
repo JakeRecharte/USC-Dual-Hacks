@@ -287,6 +287,8 @@ function ZoneStrip({ zones }: { zones: ReturnType<typeof zoneSummaries> }) {
 }
 
 const ROUTING_TONE: Record<CallRow['routing'], string> = {
+  callback_queue: 'var(--critical)',
+  abandoned_callback: 'var(--high)',
   human_now: 'var(--critical)',
   priority_queue: 'var(--high)',
   scheduled_followup: 'var(--watch)',

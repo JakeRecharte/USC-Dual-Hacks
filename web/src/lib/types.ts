@@ -28,8 +28,10 @@ export type CallerState = 'calm' | 'worried' | 'distressed' | 'panicked';
 
 /** calls.routing. */
 export type Routing =
+  | 'callback_queue'      // a transfer to a person didn't connect: call back first
   | 'human_now'
   | 'priority_queue'
+  | 'abandoned_callback'  // hung up before routing: call back
   | 'answered_by_agent'
   | 'scheduled_followup';
 
@@ -69,6 +71,8 @@ export interface CallRow {
   from_number?: string | null;
   /** Set when the agent heard life-safety language mid-sentence and bypassed the script. */
   bypass?: boolean;
+  /** Placeholder from a `lookup` before the call is routed. The first real routing replaces it. */
+  provisional?: boolean;
   caller_state?: CallerState | null;
   /** Keyword score of the caller's words. 3 or more is what trips a handoff. */
   distress_score?: number;
@@ -91,6 +95,8 @@ export const STRUCTURE_LABEL: Record<Structure, string> = {
 };
 
 export const ROUTING_LABEL: Record<Routing, string> = {
+  callback_queue: 'Call back: transfer failed',
+  abandoned_callback: 'Call back: hung up',
   human_now: 'Human now',
   priority_queue: 'Priority queue',
   answered_by_agent: 'Answered by agent',
@@ -98,11 +104,14 @@ export const ROUTING_LABEL: Record<Routing, string> = {
 };
 
 /** Routing order for the queue: most urgent first. */
+// A failed transfer outranks everything: that caller was promised a person and didn't get one.
 export const ROUTING_RANK: Record<Routing, number> = {
-  human_now: 0,
-  priority_queue: 1,
-  scheduled_followup: 2,
-  answered_by_agent: 3,
+  callback_queue: 0,
+  human_now: 1,
+  priority_queue: 2,
+  abandoned_callback: 3,
+  scheduled_followup: 4,
+  answered_by_agent: 5,
 };
 
 export const CALLER_STATE_LABEL: Record<CallerState, string> = {
