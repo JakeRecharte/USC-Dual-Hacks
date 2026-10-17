@@ -1,4 +1,4 @@
-// Runs the six scripted calls from team_plan.md against a server, signed like Retell.
+// Runs the six scripted calls from team_plan.md (plus a panic call) against a server, signed like Retell.
 //   npm run simulate                       all six, local server
 //   npm run simulate -- refused            one case by name
 //   npm run simulate -- --url https://usc-dual-hacks-production.up.railway.app
@@ -31,6 +31,7 @@ const CASES = {
   unknown: { said: 'My aunt Ruth Adams, 16800 Bollinger Drive, nobody has heard from her.', log: { mode: 'wildfire', address: '16800 Bollinger Dr', subject_name: 'Ruth Adams', with_them_now: false } },
   emergency: { said: "I'm with my mom Maria Lopez right now and she can't breathe", log: { mode: 'wildfire', address: '1420 Sunset Mesa Dr', subject_name: 'Maria Lopez', with_them_now: true, emergency: true } },
   routine_high: { said: "I haven't heard from my grandma Dorothy Hayes in two weeks. She's 84, lives alone, on oxygen. Her mail is piling up.", log: { mode: 'routine', address: '4512 Crenshaw Blvd', subject_name: 'Dorothy Hayes', with_them_now: false, last_contact_hours: 336, vulnerability: { age: 84, lives_alone: true, medical: 'oxygen' }, red_flags: { mail_piling: true } } },
+  panic: { said: "oh my god I don't know what to do, my dad Harold Kim isn't answering, 1515 Via de la Paz", log: { mode: 'wildfire', address: '1515 Via de la Paz', subject_name: 'Harold Kim', with_them_now: false } },
   routine_low: { said: "My brother Kevin Nguyen hasn't texted back since this morning. He's 40 and healthy.", log: { mode: 'routine', address: '910 N Vermont Ave', subject_name: 'Kevin Nguyen', with_them_now: false, last_contact_hours: 6, vulnerability: { age: 40 }, red_flags: {} } },
 };
 

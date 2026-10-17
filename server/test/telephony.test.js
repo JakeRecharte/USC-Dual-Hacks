@@ -5,6 +5,7 @@ import { checkBypass, callerText } from '../src/bypass.js';
 import { lookupAddress, logCall, addressKey, nameMatches } from '../src/backend.js';
 import { route, routineScore, FRESH_MIN } from '../src/routing.js';
 import { sayForLookup, sayForRouting } from '../src/speech.js';
+import { scoreDistress, handoffInstruction } from '../src/distress.js';
 
 const now = Date.now();
 const wildfire = (address, subject_name, extra = {}) =>
@@ -131,6 +132,34 @@ test('emergency words in the live transcript, caller side only', () => {
   // A condition is a vulnerability, not an emergency in progress.
   assert.equal(checkBypass("she's 84, lives alone, on oxygen"), null);
   assert.equal(checkBypass(callerText({ transcript: 'Agent: is anyone trapped?\nUser: no' })), null);
+});
+
+const t = (...lines) => ({ transcript: lines.join('\n') });
+
+test('distress: ordinary worry scores nothing', () => {
+  const d = scoreDistress(t('Agent: Is anyone hurt or in danger?', "User: No, I just can't reach my mom.",
+    'Agent: Who are you calling about?', 'User: Maria Lopez, 1420 Sunset Mesa Drive. I\'m really worried about her.'));
+  assert.equal(d.distressed, false, d.reasons.join());
+});
+
+test('distress: panic in the caller\'s words fires', () => {
+  const d = scoreDistress(t('Agent: Is anyone hurt?', "User: oh my god I don't know what to do, she's not answering"));
+  assert.equal(d.distressed, true);
+});
+
+test('distress: speech recognition failing (agent asks to repeat twice) plus fragments fires', () => {
+  const d = scoreDistress(t('Agent: Who are you calling about?', 'User: my', "Agent: Sorry, I didn't catch that.",
+    'User: the', 'Agent: Could you repeat that?', 'User: house'));
+  assert.equal(d.distressed, true, d.reasons.join());
+});
+
+test('distress: agent lines never count as caller panic', () => {
+  const d = scoreDistress(t("Agent: Oh my god, please hurry, I don't know what to do", 'User: my dad Harold Kim'));
+  assert.equal(d.distressed, false);
+});
+
+test('handoff instruction tells the agent to transfer', () => {
+  assert.match(handoffInstruction(['said "oh my god"']), /request_human.*transfer_to_human/);
 });
 
 test('emergency overrides a fresh cleared record', () => {
