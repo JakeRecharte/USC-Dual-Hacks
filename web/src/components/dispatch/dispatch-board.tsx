@@ -7,7 +7,6 @@ import { useMemo, useState } from 'react';
 // says so in its own header, and this import was quietly undoing it.
 import { ZONE_NAMES } from '@/lib/zones';
 import {
-  HEAT_STOPS,
   URGENCY_COLOR,
   doorKnockList,
   isStale,
@@ -39,7 +38,7 @@ export function DispatchBoard() {
   const { calls, connection: callFeed, upsert } = useCalls();
   const now = useNow(15_000);
 
-  const [mode, setMode] = useState<MapMode>('heat');
+  const [mode, setMode] = useState<MapMode>('buildings');
   const [focusId, setFocusId] = useState<string | null>(null);
 
   const inPerimeter = useMemo(() => addresses.filter((a) => a.inside_perimeter), [addresses]);
@@ -154,7 +153,7 @@ export function DispatchBoard() {
             <div className="pointer-events-none absolute inset-x-0 top-0 z-[500] flex flex-wrap items-start justify-between gap-2 p-3">
               <Legend mode={mode} />
               <div className="pointer-events-auto flex rounded-lg border border-paper-rule bg-paper-card/95 p-0.5 shadow-[0_12px_28px_-18px_rgba(43,29,18,.6)] backdrop-blur">
-                {(['heat', 'zones'] as MapMode[]).map((m) => (
+                {(['buildings', 'zones'] as MapMode[]).map((m) => (
                   <button
                     key={m}
                     type="button"
@@ -166,7 +165,7 @@ export function DispatchBoard() {
                         : 'text-paper-ink-2 hover:text-paper-ink'
                     }`}
                   >
-                    {m === 'heat' ? 'Density' : 'Zones'}
+                    {m === 'buildings' ? 'Buildings' : 'Zones'}
                   </button>
                 ))}
               </div>
@@ -228,28 +227,13 @@ const LEGEND_ITEMS: { urgency: Urgency; label: string }[] = [
   { urgency: 'clear', label: 'Cleared' },
 ];
 
-/**
- * Key for the map. Reads the same stops the heat ramp is built from, so the two cannot
- * drift, and labels every colour rather than relying on hue alone.
- */
+/** Key for the map. Labels every colour rather than relying on hue alone. */
 function Legend({ mode }: { mode: MapMode }) {
-  const gradient = `linear-gradient(90deg, rgba(244,239,230,0), ${HEAT_STOPS.map(([, c]) => c).join(', ')})`;
-
   return (
     <div className="pointer-events-auto w-48 rounded-lg border border-paper-rule bg-paper-card/95 px-3 py-2.5 shadow-[0_12px_28px_-16px_rgba(43,29,18,.5)] backdrop-blur sm:w-56">
-      <div className="eyebrow">{mode === 'heat' ? 'Still to reach' : 'Zone priority'}</div>
+      <div className="eyebrow">{mode === 'buildings' ? 'Evacuation status' : 'Zone priority'}</div>
 
-      {mode === 'heat' && (
-        <>
-          <div aria-hidden className="mt-2 h-2 rounded-sm" style={{ background: gradient }} />
-          <div className="mt-1 flex justify-between font-mono text-[11px] text-paper-ink-2">
-            <span>handled</span>
-            <span>needs officers</span>
-          </div>
-        </>
-      )}
-
-      <ul className={`grid gap-1 ${mode === 'heat' ? 'mt-2 border-t border-paper-rule-soft pt-2' : 'mt-2'}`}>
+      <ul className="mt-2 grid gap-1">
         {LEGEND_ITEMS.map((i) => (
           <li key={i.urgency} className="flex items-center gap-2 text-[11px] text-paper-ink-2">
             <span

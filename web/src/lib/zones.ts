@@ -8,9 +8,14 @@ export type LatLngTuple = [number, number];
  * The active fire perimeter: the `perimeter` polygon in the data contract. Traced around
  * Pacific Palisades from the coast at Topanga, north into Santa Ynez Canyon and the state
  * park edge, then east to the Santa Monica line and back along the shore.
+ *
+ * The shore edge hugs the southernmost houses along PCH (about 50 m past them), so the
+ * beach and the surf stay outside the line. Of the 8,103 building footprints, 15 fall
+ * outside it, all of them seaward of PCH: a beach club and a handful of lifeguard towers
+ * and restrooms. No dwelling is excluded.
  */
 export const PERIMETER: LatLngTuple[] = [
-  [34.0335, -118.5890],
+  [34.0382, -118.5895],
   [34.0480, -118.5910],
   [34.0625, -118.5865],
   [34.0725, -118.5795],
@@ -23,9 +28,19 @@ export const PERIMETER: LatLngTuple[] = [
   [34.0455, -118.4940],
   [34.0355, -118.4960],
   [34.0290, -118.5040],
-  [34.0285, -118.5300],
-  [34.0300, -118.5560],
-  [34.0320, -118.5760],
+  [34.0286, -118.5235],
+  [34.0310, -118.5285],
+  [34.0337, -118.5335],
+  [34.0374, -118.5385],
+  [34.0374, -118.5435],
+  [34.0400, -118.5485],
+  [34.0393, -118.5535],
+  [34.0393, -118.5585],
+  [34.0413, -118.5635],
+  [34.0415, -118.5685],
+  [34.0414, -118.5735],
+  [34.0399, -118.5785],
+  [34.0377, -118.5835],
 ];
 
 /**

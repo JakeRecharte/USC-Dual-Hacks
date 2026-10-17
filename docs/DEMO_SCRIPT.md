@@ -17,7 +17,7 @@ Two screens: a **laptop** on `/dispatch` (shared/projected) and a **phone** on `
 4. Click **Reset demo data** in the dispatch header. Do this between every take.
 5. Confirm both feeds are green in the header: *Status feed live*, *Call feed live*. If the
    call feed is not live, see the fallback at the bottom.
-6. Map on **Density**. Have the phone already scrolled to **640 Toyopa Dr**.
+6. Map on **Buildings**. Have the phone already scrolled to **640 Toyopa Dr**.
 
 A clean reset shows **1,108 unresolved of 1,998**, **83 refused**, **414 never contacted**,
 **202 stale clears**, and the zone strip led by Rustic Canyon `PAL-07` at `183/229`. If those
@@ -27,14 +27,14 @@ don't match, you didn't reset.
 
 ## Beat 1 — the board (0:00–0:30)
 
-**Show:** the dispatch map on Density.
+**Show:** the dispatch map on Buildings.
 
 > "This is Pacific Palisades during a wildfire — two thousand households, from the coast at
 > Castellammare up into the Highlands. Every one of those shapes is a real house, traced from
-> the map. The heat is not population — it's **where we still don't know if anyone is
-> inside**. Dark means officers are needed. It fades as doors get answered."
+> the map. The colour is not population — it's **where we still don't know if anyone is
+> inside**. Red and amber mean officers are needed. It turns green as doors get answered."
 
-Zoom in once: the blobs resolve into individual houses, each one coloured by its status, with
+Zoom in once: the dots resolve into individual houses, each one coloured by its status, with
 the grey ones around them the buildings nobody has a record for.
 
 Click **Zones**. Zone circles and the `183/229` labels come up.
@@ -42,9 +42,9 @@ Click **Zones**. Zone circles and the `183/229` labels come up.
 > "Rustic Canyon — a hundred and eighty-three of two hundred and twenty-nine still
 > unanswered. Deep canyon, bad signal, nobody has worked it. That's where the next crew goes."
 
-Click back to **Density**.
+Click back to **Buildings**.
 
-**Why it matters:** the fade is the whole point. Say it now, because beat 2 shows it happening.
+**Why it matters:** the colour change is the whole point. Say it now, because beat 2 shows it happening.
 
 ## Beat 2 — the officer taps Refused (0:30–1:00)
 

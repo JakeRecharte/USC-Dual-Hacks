@@ -1,4 +1,4 @@
-// How a status becomes a colour, a heat weight and a place in the door-knock list.
+// How a status becomes a colour and a place in the door-knock list.
 // Pure, with `now` injected, so the board and the tests agree.
 import type { AddressState, HouseColor, Status } from './types';
 
@@ -55,27 +55,6 @@ export const HOUSE_COLOR: Record<HouseColor, string> = {
   green: URGENCY_COLOR.clear,
 };
 
-/**
- * Door-knock density: a sequential single-hue ember ramp, light to dark, the same structure
- * as the reference's capacity ramp. Not green-to-red — that is the worst case for red-green
- * colourblindness, because the safe end and the dangerous end become the same colour. Here
- * low density simply fades into the paper, so "no heat" means the block is handled.
- */
-export const HEAT_STOPS: ReadonlyArray<readonly [stop: number, color: string]> = [
-  [0.25, '#e8b04b'],
-  [0.5, '#d4841f'],
-  [0.75, '#b4511b'],
-  [1, '#8f2e21'],
-];
-
-/** Heat weight, 0–1. Feeds the density layer; also the sort key inside an urgency band. */
-export const URGENCY_WEIGHT: Record<Urgency, number> = {
-  critical: 1,
-  high: 0.8,
-  watch: 0.45,
-  clear: 0.05,
-};
-
 export function ageMinutes(recordedAt: string | null, now: number): number {
   if (!recordedAt) return Infinity;
   const t = Date.parse(recordedAt);
@@ -88,8 +67,8 @@ export function isStale(status: Status, recordedAt: string | null, now: number):
 }
 
 /**
- * A destroyed structure is no longer an evacuation question, so it stops driving the heat
- * layer. It is still flagged on the board and in its own damage count.
+ * A destroyed structure is no longer an evacuation question, so it stops counting as
+ * unresolved. It is still flagged on the board and in its own damage count.
  */
 export function urgencyOf(a: AddressState, now: number): Urgency {
   if (a.structure === 'destroyed') return 'clear';

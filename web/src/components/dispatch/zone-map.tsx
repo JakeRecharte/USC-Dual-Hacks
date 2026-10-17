@@ -10,7 +10,7 @@ import * as maplibreNs from 'maplibre-gl';
 import type { Map as MlMap, StyleSpecification } from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { PERIMETER, ZONE_NAMES, type LatLngTuple } from '@/lib/zones';
-import { HEAT_STOPS, HOUSE_COLOR, URGENCY_COLOR, URGENCY_WEIGHT, reasonOf, urgencyOf, zoneSummaries } from '@/lib/priority';
+import { HOUSE_COLOR, URGENCY_COLOR, reasonOf, urgencyOf, zoneSummaries } from '@/lib/priority';
 import { STATUS_LABEL, STRUCTURE_LABEL } from '@/lib/types';
 import type { AddressState } from '@/lib/types';
 
@@ -22,7 +22,7 @@ import type { AddressState } from '@/lib/types';
 const maplibregl = ((maplibreNs as unknown as { default?: typeof maplibreNs }).default ??
   maplibreNs) as typeof maplibreNs;
 
-export type MapMode = 'heat' | 'zones';
+export type MapMode = 'buildings' | 'zones';
 
 const PAPER = '#f4efe6';
 const CONTEXT = '#7d8a96';
@@ -339,8 +339,8 @@ export function ZoneMap({
       map.addSource('zones', { type: 'geojson', data: emptyCollection() });
       map.addSource('context-buildings', { type: 'geojson', data: emptyCollection() });
       map.addSource('households', { type: 'geojson', data: emptyCollection() });
-      // Points drive the density layer and stand in for the outlines when zoomed out far
-      // enough that a footprint is smaller than a pixel.
+      // Stand in for the outlines when zoomed out far enough that a footprint is smaller
+      // than a pixel.
       map.addSource('household-points', { type: 'geojson', data: emptyCollection() });
 
       map.addLayer({
@@ -372,23 +372,6 @@ export function ZoneMap({
         },
         paint: { 'text-color': ['get', 'color'], 'text-halo-color': PAPER, 'text-halo-width': 1.6 },
       });
-
-      // Density of households still needing a knock. Weight comes from urgency, so an
-      // evacuated block cools off as officers work through it.
-      map.addLayer({
-        id: 'heat', type: 'heatmap', source: 'household-points',
-        paint: {
-          'heatmap-weight': ['get', 'weight'],
-          'heatmap-intensity': ['interpolate', ['linear'], ['zoom'], 11, 0.9, 15, 1.5],
-          'heatmap-radius': ['interpolate', ['linear'], ['zoom'], 11, 18, 13, 34, 16, 70],
-          'heatmap-opacity': 0.75,
-          'heatmap-color': [
-            'interpolate', ['linear'], ['heatmap-density'],
-            0, 'rgba(244,239,230,0)',
-            ...HEAT_STOPS.flatMap(([stop, color]) => [stop, color]),
-          ],
-        },
-      }, LABELS);
 
       // Every dwelling the perimeter contains, including the ones with no record. Grey, the
       // way the reference greys parcels outside the current filter: present, not tracked.
@@ -502,8 +485,6 @@ function paint(
   const zones = map.getSource('zones') as maplibregl.GeoJSONSource | undefined;
   if (!households || !points || !zones) return;
 
-  const heatMode = mode === 'heat';
-
   // One feature per household, carrying the real outline of its building. A household whose
   // outline is missing falls back to a small square so it is never invisible.
   households.setData({
@@ -517,8 +498,7 @@ function paint(
         properties: {
           id: a.id,
           color: a.color ? HOUSE_COLOR[a.color] : URGENCY_COLOR[urgency],
-          // Under the density layer the outlines recede so the blobs read.
-          fillOpacity: heatMode ? 0.45 : 0.85,
+          fillOpacity: 0.85,
           popup: popupHtml(a, now),
         },
       } satisfies GeoJSON.Feature;
@@ -534,8 +514,7 @@ function paint(
         geometry: { type: 'Point', coordinates: [a.lng, a.lat] },
         properties: {
           color: a.color ? HOUSE_COLOR[a.color] : URGENCY_COLOR[urgency],
-          weight: URGENCY_WEIGHT[urgency],
-          dotOpacity: heatMode ? 0.5 : 0.9,
+          dotOpacity: 0.9,
         },
       } satisfies GeoJSON.Feature;
     }),
@@ -558,12 +537,9 @@ function paint(
     }),
   });
 
-  const zoneVisible = heatMode ? 'none' : 'visible';
+  const zoneVisible = mode === 'zones' ? 'visible' : 'none';
   for (const id of ['zone-fill', 'zone-line', 'zone-label']) {
     if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', zoneVisible);
-  }
-  if (map.getLayer('heat')) {
-    map.setLayoutProperty('heat', 'visibility', heatMode ? 'visible' : 'none');
   }
 }
 
