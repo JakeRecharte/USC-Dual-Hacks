@@ -4,17 +4,21 @@
 // signal: when we can't understand the caller, a human takes over.
 //
 // Welfare callers are worried by definition. "I can't reach my mom" is the normal call,
-// not distress, so ordinary worry scores nothing. Only panic, pleading, or a breakdown in
+// not distress, so ordinary worry scores little. Only panic, pleading, or a breakdown in
 // the conversation adds up.
+import { findPhrase } from './bypass.js';
 
 export const DISTRESS = {
   threshold: 3,
-  // +2 each: panic or pleading in the caller's own words
-  panic: [
-    'oh my god', 'oh god', 'please hurry', 'hurry please', 'please help', 'somebody help',
-    "i'm scared", 'i am scared', "i'm terrified", "i'm panicking", "i can't do this",
-    "i don't know what to do", 'what do i do', 'please please', "i can't breathe",
-    'ay dios', 'por favor ayuda', 'ayúdame', 'ayudame',
+  // +2 each: unmistakable panic or pleading in the caller's own words
+  strong: [
+    'please hurry', 'hurry please', 'somebody help', 'someone help', "i'm panicking", "i'm terrified",
+    'please please', "i can't breathe", 'i need help now', 'ayúdame', 'ayudame', 'por favor ayuda',
+  ],
+  // +1 each: things worried-but-coping callers also say. Two of these alone stay "worried".
+  mild: [
+    'oh my god', 'oh god', "i'm scared", 'i am scared', "i don't know what to do", 'what do i do',
+    "i can't do this", 'please help', 'ay dios',
   ],
   // +2 when the agent has had to ask the caller to repeat this many times: ASR is failing
   repeatAsks: 2,
@@ -43,9 +47,11 @@ export function scoreDistress(call, cfg = DISTRESS) {
   const reasons = [];
   let score = 0;
 
-  const said = user.join(' ');
-  for (const p of cfg.panic) {
-    if (said.includes(p)) { score += 2; reasons.push(`said "${p}"`); }
+  const said = user.join('. ');
+  for (const [phrases, weight] of [[cfg.strong, 2], [cfg.mild, 1]]) {
+    for (const p of phrases) {
+      if (findPhrase(said, [p])) { score += weight; reasons.push(`said "${p}"`); }
+    }
   }
 
   const asks = agent.filter((a) => cfg.agentRepeatPhrases.some((p) => a.includes(p))).length;

@@ -65,9 +65,12 @@ async function upsertAgent({ name, prompt, toolList, beginMessage, startSpeaker,
     voice_id: VOICE,
     language: 'multi',
     webhook_url: `${base}/webhook/retell`,
-    webhook_events: ['call_started', 'call_ended', 'call_analyzed', 'transcript_updated'],
-    max_call_duration_ms: 5 * 60 * 1000, // silence is billed
-    end_call_after_silence_ms: 20 * 1000,
+    webhook_events: ['call_started', 'call_ended', 'call_analyzed', 'transcript_updated',
+      'transfer_started', 'transfer_bridged', 'transfer_cancelled', 'transfer_ended'],
+    // Long enough for the routine intake; never cut off someone who may be in danger.
+    max_call_duration_ms: 10 * 60 * 1000,
+    // A caller who goes quiet may be crying. Retell's default is 10 min; 60s still ends dead lines.
+    end_call_after_silence_ms: 60 * 1000,
     interruption_sensitivity: 1, // barge-in is part of the demo
   };
 

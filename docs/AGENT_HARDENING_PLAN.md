@@ -76,7 +76,7 @@ is the match *between* field results and calls, so calls must also flow back int
 
 Ordered by **what a judge or a real caller hits first**. Times are focused work.
 
-### Phase A: stop false alarms and false refusals (≈ 45 min) · do first
+### Phase A: stop false alarms and false refusals (≈ 45 min) · ✅ DONE 10:45
 
 All in `bypass.js`, `distress.js`, `backend.js`, plus tests for every row in §2.
 
@@ -85,6 +85,8 @@ All in `bypass.js`, `distress.js`, `backend.js`, plus tests for every row in §2
    appears in the 4 words before it (B1, B2). Keep firing on "she's **not breathing**",
    since that phrase is itself in the list.
 3. **Drop "help me"** from emergency words; keep "help me, she's…" handled by the agent (B3).
+   *Built:* subject negators ("nobody", "no one", "nadie") cancel within 5 words, plain ones
+   ("no", "not", "isn't") within 2, so "no my dad is trapped" still fires.
 4. **Distress calibration:** "oh god" +1, not +2; "I don't know what to do" alone +1. Panic
    needs two strong cues or one cue plus a conversation breakdown (B5). Add the fixture
    *"oh god I don't know what to do, she won't answer"* → must stay `worried`.
@@ -98,7 +100,7 @@ All in `bypass.js`, `distress.js`, `backend.js`, plus tests for every row in §2
 
 **Done when:** every row in §2 table B is a passing test, and the six scripted cases still pass.
 
-### Phase B: nobody disappears (≈ 60 min) · the supervisor's question #3
+### Phase B: nobody disappears (≈ 60 min) · ✅ DONE 10:45 (transfer events still need one real declined call)
 
 "What happens when someone doesn't pick up?" is one of the three questions the track asks.
 

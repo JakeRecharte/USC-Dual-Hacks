@@ -12,11 +12,14 @@ export const config = {
 
   // Keyword pass over the live transcript, every chunk. Flags the session for the console
   // the moment these are said; the agent's own request_human/transfer does the transfer.
-  // Not "oxygen" or other conditions: "she's on oxygen" describes a vulnerability (scored
-  // by log_call), not an emergency happening now.
+  // Whole words, negation-aware (see bypass.js). Not "oxygen" or other conditions: "she's
+  // on oxygen" is a vulnerability (scored by log_call), not an emergency happening now.
+  // Not "help me": "can you help me find my mom" is how ordinary calls start.
   bypassPhrases: [
-    'bleeding', 'trapped', "can't get out", 'cant get out', 'stuck inside', 'someone inside',
-    'not breathing', "can't breathe", 'unconscious', 'collapsed', 'gun', 'knife', 'help me',
-    'sangrando', 'atrapado', 'atrapada', 'no puede respirar', 'inconsciente',
+    'bleeding', 'trapped', "can't get out", 'cant get out', 'stuck inside', 'still inside', 'someone inside',
+    'not breathing', "isn't breathing", 'stopped breathing', "can't breathe", 'unconscious', 'unresponsive',
+    'not responding', "can't get up", 'collapsed', 'house is on fire', 'on fire', 'fire in the house',
+    'gun', 'shot', 'knife', 'stabbed',
+    'sangrando', 'atrapado', 'atrapada', 'no puede respirar', 'inconsciente', 'no responde',
   ],
 };

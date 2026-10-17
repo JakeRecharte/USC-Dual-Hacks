@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { checkBypass, callerText } from '../src/bypass.js';
-import { lookupAddress, logCall, addressKey, nameMatches } from '../src/backend.js';
+import { lookupAddress, logCall, logUnrouted, logTransferFailed, getCall, addressKey, nameMatches, spokenNumber } from '../src/backend.js';
 import { route, routineScore, FRESH_MIN } from '../src/routing.js';
 import { sayForLookup, sayForRouting } from '../src/speech.js';
 import { scoreDistress, handoffInstruction } from '../src/distress.js';
@@ -143,7 +143,7 @@ test('distress: ordinary worry scores nothing', () => {
 });
 
 test('distress: panic in the caller\'s words fires', () => {
-  const d = scoreDistress(t('Agent: Is anyone hurt?', "User: oh my god I don't know what to do, she's not answering"));
+  const d = scoreDistress(t('Agent: Is anyone hurt?', "User: oh my god please hurry, I don't know what to do"));
   assert.equal(d.distressed, true);
 });
 
@@ -189,4 +189,108 @@ test('caller state never moves a call down', () => {
 test('emergency overrides a fresh cleared record', () => {
   const lookup = { found: true, name_match: true, status: 'cleared', recorded_at: new Date(now - 5 * 60000).toISOString(), inside_perimeter: true };
   assert.equal(route({ mode: 'wildfire', emergency: true }, lookup, now).routing, 'human_now');
+});
+
+// ── Phase A: false alarms and false refusals (docs/AGENT_HARDENING_PLAN.md §2) ──
+
+test('B1-B4: calm answers and street names never fire an emergency', () => {
+  for (const s of ['No, nobody is trapped', 'No one is hurt or bleeding', 'nobody is hurt and no one is bleeding',
+    'can you help me find out if my mom got out', 'she lives on Gunderson Ave', 'he had begun packing',
+    "I'm not scared, nobody's stuck inside", 'no, nadie está atrapado']) {
+    assert.equal(checkBypass(s), null, s);
+  }
+});
+
+test('B1-B4: real emergencies still fire, including after a leading "no"', () => {
+  for (const [s, want] of [['No, but my dad is trapped', 'trapped'], ['no my dad is trapped', 'trapped'],
+    ["she's not answering and she's trapped", 'trapped'], ["she's not breathing", 'not breathing'],
+    ['the house is on fire and she is inside', 'house is on fire'], ["she fell and can't get up", "can't get up"],
+    ['mi mamá está atrapada', 'atrapada'], ['a man has a gun', 'gun']]) {
+    assert.equal(checkBypass(s), want, s);
+  }
+});
+
+test('B5: ordinary worry stays worried; real panic fires', () => {
+  assert.equal(scoreDistress(t("User: oh god I don't know what to do, she won't answer her phone")).distressed, false);
+  assert.equal(scoreDistress(t("User: I'm not scared, just worried")).score, 0);
+  assert.equal(scoreDistress(t('User: oh my god please hurry, somebody help')).distressed, true);
+});
+
+test('B6-B7: accents, hyphens and apostrophes in names', () => {
+  assert.equal(nameMatches('Maria Lopez', 'María López'), true);
+  assert.equal(nameMatches('María López', 'maria lopez'), true);
+  assert.equal(nameMatches('Maria Lopez', 'Maria Lopez-Garcia'), true);
+  assert.equal(nameMatches('María López-García', 'Maria Garcia'), true);
+  assert.equal(nameMatches("Sean O'Brien", 'sean obrien'), true);
+  assert.equal(nameMatches('Maria Elena Lopez', 'Maria Lopez'), true);
+  assert.equal(nameMatches('Maria Lopez', 'Lopez'), false);
+  assert.equal(nameMatches('Maria Lopez', 'Rosa Lopez'), false);
+});
+
+test('B8-B10: addresses with city, ZIP, unit, commas, spoken numbers', () => {
+  const k = addressKey('1420 Sunset Mesa Dr');
+  for (const a of ['1420 Sunset Mesa Dr, Pacific Palisades, CA 90272', '1420 Sunset Mesa Dr Apt 3', '1420 Sunset Mesa Dr #3',
+    '1,420 Sunset Mesa Dr', 'fourteen twenty Sunset Mesa Drive', 'one four two zero sunset mesa drive', 'Sunset Mesa 1420']) {
+    assert.equal(addressKey(a), k, a);
+  }
+  assert.notEqual(addressKey('1421 Sunset Mesa Dr'), k);
+  for (const [w, n] of [['sixteen eight hundred', '16800'], ['nine ten', '910'], ['eleven hundred', '1100'],
+    ['forty five twelve', '4512'], ['eight hundred twenty', '820'], ['twenty one oh five', '2105']]) {
+    assert.equal(spokenNumber(w.split(' ')), n, w);
+  }
+});
+
+// ── Phase B: nobody disappears ──
+
+const base = (call_id, from_number, extra = {}) => ({ mode: 'wildfire', address: '16800 Bollinger Dr', subject_name: 'Ruth Adams',
+  with_them_now: false, caller_state: 'worried', call_id, from_number, ...extra });
+
+test('G1: a caller who hangs up before routing gets a callback row', () => {
+  const row = logUnrouted({ address: '16800 Bollinger Dr', subject_name: 'Ruth Adams', caller_state: 'distressed' },
+    { call_id: 'g1', from_number: '+13105550001', disconnection_reason: 'user_hangup' }, now);
+  assert.equal(row.routing, 'abandoned_callback');
+  assert.equal(row.severity, 4);
+  assert.match(row.reason, /call back \+13105550001/);
+});
+
+test('G1: an emergency-path transfer with no log_call still gets a row', () => {
+  const row = logUnrouted({ bypass_reason: 'emergency: said "trapped"' }, { call_id: 'g1b', from_number: '+1', disconnection_reason: 'call_transfer' }, now);
+  assert.equal(row.routing, 'human_now');
+});
+
+test('G2: a failed transfer becomes the top-priority callback and is never downgraded', async () => {
+  await logCall(base('g2', '+13105550002'), now);
+  const row = logTransferFailed('g2', '+13105550002', 'no_answer', now);
+  assert.equal(row.routing, 'callback_queue');
+  await logCall(base('g2', '+13105550002'), now); // a late log_call can't lower it
+  assert.equal(getCall('g2').routing, 'callback_queue');
+});
+
+test('G4: log_call twice in one call is one row, routing only moves up', async () => {
+  await logCall({ ...base('g4', '+13105550004'), address: '1420 Sunset Mesa Dr', subject_name: 'Maria Lopez' }, now);
+  assert.equal(getCall('g4').routing, 'answered_by_agent');
+  await logCall({ ...base('g4', '+13105550004'), address: '1420 Sunset Mesa Dr', subject_name: 'Maria Lopez', caller_update: 'she texted, still home' }, now);
+  assert.equal(getCall('g4').routing, 'priority_queue');
+  await logCall({ ...base('g4', '+13105550004'), address: '1420 Sunset Mesa Dr', subject_name: 'Maria Lopez' }, now);
+  assert.equal(getCall('g4').routing, 'priority_queue');
+});
+
+test('Repeat callers about one address move it up; the same number twice does not', async () => {
+  const addr = { address: '1100 Palisades Dr', subject_name: 'Tom Becker' }; // stale cleared → priority 3
+  const a = (await logCall(base('r1', '+13105550101', addr), now)).row;
+  const again = (await logCall(base('r1b', '+13105550101', addr), now)).row;
+  const b = (await logCall(base('r2', '+13105550102', addr), now)).row;
+  const c = (await logCall(base('r3', '+13105550103', addr), now)).row;
+  assert.equal(a.severity, 3);
+  assert.equal(again.severity, 3, 'same number calling back is not a new source');
+  assert.equal(b.routing, 'priority_queue');
+  assert.equal(b.severity, 4);
+  assert.equal(c.routing, 'human_now');
+  assert.match(c.reason, /3 separate callers/);
+});
+
+test('Repeat callers never override a fresh cleared answer', async () => {
+  const addr = { address: '820 Chautauqua Blvd', subject_name: 'Linda Park' };
+  for (const [i, n] of ['+1310555021', '+1310555022', '+1310555023'].entries()) await logCall(base(`c${i}`, n, addr), now);
+  assert.equal(getCall('c2').routing, 'answered_by_agent');
 });

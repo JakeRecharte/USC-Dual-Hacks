@@ -20,11 +20,21 @@ export function route(call, lookup, now) {
   if (call.caller_state === 'panicked' && !call.with_them_now && !call.emergency) {
     return { routing: 'human_now', severity: 5, reason: 'caller panicked' };
   }
-  const decision = routeOnFacts(call, lookup, now);
-  if (call.caller_state === 'distressed' && ['answered_by_agent', 'scheduled_followup'].includes(decision.routing)) {
-    return { routing: 'priority_queue', severity: Math.max(decision.severity, 4), reason: `${decision.reason}; caller distressed` };
+  let d = routeOnFacts(call, lookup, now);
+  if (call.caller_state === 'distressed' && ['answered_by_agent', 'scheduled_followup'].includes(d.routing)) {
+    d = { routing: 'priority_queue', severity: Math.max(d.severity, 4), reason: `${d.reason}; caller distressed` };
   }
-  return decision;
+  return repeatCallers(d, call.prior_callers || 0);
+}
+
+// Other people already called about this address. A fresh "cleared" still answers them;
+// anything queued moves up, and a third separate caller about an unresolved house gets a
+// person now.
+function repeatCallers(d, prior) {
+  if (!prior || d.routing === 'answered_by_agent' || d.routing === 'human_now') return d;
+  const note = `; ${prior + 1} separate callers about this address`;
+  if (prior >= 2 && d.routing === 'priority_queue') return { routing: 'human_now', severity: 5, reason: d.reason + note };
+  return { routing: 'priority_queue', severity: Math.min(5, Math.max(d.severity, 3) + 1), reason: d.reason + note };
 }
 
 function routeOnFacts(call, lookup, now) {

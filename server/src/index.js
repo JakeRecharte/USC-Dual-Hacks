@@ -106,7 +106,7 @@ app.post('/fn/log_call', { preHandler: verifyRetell }, async (req, reply) => {
   reply.send({ routing: row.routing, severity: row.severity, reason: row.reason, transfer, say: sayForRouting[row.routing] });
 
   setImmediate(() => {
-    sessions.upsert(call.call_id, { routing: row.routing, severity: row.severity });
+    sessions.upsert(call.call_id, { routing: row.routing, severity: row.severity, logged: true });
     sessions.bus.emit('call_logged', { ...row, simulated: Boolean(call.simulated) });
     req.log.info({ call_id: call.call_id, routing: row.routing, severity: row.severity, reason: row.reason }, 'call logged');
   });
@@ -172,10 +172,31 @@ app.post('/webhook/retell', { preHandler: verifyRetell }, async (req, reply) => 
       handoff(call, reasons, req.log);
       return;
     } else if (event === 'call_ended') {
-      sessions.upsert(call.call_id, {
+      const ended = sessions.upsert(call.call_id, {
         ended_at: call.end_timestamp || Date.now(),
         transcript: call.transcript, disconnection_reason: call.disconnection_reason,
       });
+      // Hung up before routing, or transferred on the emergency path: still gets a row.
+      if (!ended.logged) {
+        const row = backend.logUnrouted(ended, call, Date.now());
+        sessions.upsert(call.call_id, { routing: row.routing, logged: true });
+        sessions.bus.emit('call_logged', { ...row, simulated: Boolean(call.simulated) });
+        req.log.warn({ call_id: call.call_id, routing: row.routing, reason: row.reason }, 'call ended unrouted');
+      }
+    } else if (event === 'transfer_bridged') {
+      sessions.upsert(call.call_id, { transfer: 'connected' });
+    } else if (event === 'transfer_cancelled' || event === 'transfer_ended') {
+      const s = sessions.get(call.call_id);
+      if (s?.transfer !== 'connected') {
+        const detail = call.transfer_status || call.disconnection_reason || event;
+        const row = backend.logTransferFailed(call.call_id, call.from_number ?? s?.from_number, detail, Date.now());
+        sessions.upsert(call.call_id, { transfer: 'failed', routing: row.routing, logged: true });
+        sessions.bus.emit('call_logged', { ...row, simulated: Boolean(call.simulated) });
+        sessions.bus.emit('transfer_failed', { call_id: call.call_id, detail, now: Date.now() });
+        req.log.error({ call_id: call.call_id, detail }, 'TRANSFER FAILED: caller needs a callback');
+      }
+    } else if (event === 'transfer_started') {
+      sessions.upsert(call.call_id, { transfer: 'ringing' });
     }
     sessions.bus.emit(event, call);
     req.log.info({ event, call_id: call.call_id }, 'lifecycle');
@@ -201,7 +222,7 @@ app.get('/health', async () => ({ ok: true }));
 
 // Server-sent events: every bus event, live. The console opens one EventSource and never
 // polls. First message is a full snapshot so a reconnect starts from current state.
-const STREAMED = ['lookup', 'call_logged', 'bypass', 'emotion', 'call_started', 'call_ended', 'call_analyzed'];
+const STREAMED = ['lookup', 'call_logged', 'bypass', 'emotion', 'transfer_failed', 'call_started', 'call_ended', 'call_analyzed'];
 app.get('/events', (req, reply) => {
   reply.hijack();
   reply.raw.writeHead(200, {
