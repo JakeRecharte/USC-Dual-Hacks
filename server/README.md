@@ -38,6 +38,14 @@ A wrong name gets no status at all: the looting safeguard.
 Fill in `server/.env` (copied from `.env.example`). `RETELL_API_KEY` signs simulated
 requests and verifies `x-retell-signature` on real ones.
 
+## Supabase
+
+With `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY` set (Railway variables), the agent reads the
+**same** `addresses` + `status_log` the board writes, so an officer's tap is what the next
+caller hears. Every call is upserted into `calls` (create it once with `docs/sql/calls.sql`).
+Without them, or if the database errors mid-call, it answers from the in-memory fake data.
+`GET /health` says which: `{ data: { mode: 'supabase' | 'memory', lastError } }`.
+
 ## Deploy
 
 Live at `https://usc-dual-hacks-production.up.railway.app` (Railway project

@@ -6,6 +6,7 @@ import { checkBypass, callerText } from './bypass.js';
 import { scoreDistress, handoffInstruction } from './distress.js';
 import * as sessions from './sessions.js';
 import * as backend from './backend.js';
+import { dbHealth } from './db.js';
 import { FRESH_MIN } from './routing.js';
 import { sayForLookup, sayForRouting } from './speech.js';
 
@@ -97,6 +98,7 @@ app.post('/fn/log_call', { preHandler: verifyRetell }, async (req, reply) => {
     vulnerability: args.vulnerability || {},
     red_flags: args.red_flags || {},
     caller_state: callerState,
+    simulated: Boolean(call.simulated),
     call_id: call.call_id,
     from_number: call.from_number,
   };
@@ -121,7 +123,7 @@ app.post('/fn/request_human', { preHandler: verifyRetell }, async (req, reply) =
 
   setImmediate(() => {
     sessions.upsert(call.call_id, { routing: 'human_now', bypass_reason: args.reason });
-    sessions.bus.emit('bypass', { call_id: call.call_id, from_number: call.from_number, reason: args.reason, now: Date.now() });
+    sessions.bus.emit('bypass', { call_id: call.call_id, from_number: call.from_number, kind: 'agent', reasons: [args.reason].filter(Boolean), now: Date.now() });
     req.log.warn({ call_id: call.call_id, reason: args.reason }, 'BYPASS requested');
   });
 });
@@ -218,7 +220,7 @@ const snapshot = () => ({
 app.get('/sessions', async () => ({ active: sessions.active().length, sessions: sessions.all() }));
 app.get('/calls', async () => backend.allCalls());
 app.get('/state', async () => snapshot());
-app.get('/health', async () => ({ ok: true }));
+app.get('/health', async () => ({ ok: true, data: dbHealth }));
 
 // Server-sent events: every bus event, live. The console opens one EventSource and never
 // polls. First message is a full snapshot so a reconnect starts from current state.

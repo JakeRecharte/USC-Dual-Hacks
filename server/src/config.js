@@ -10,6 +10,10 @@ export const config = {
 
   fromNumber: process.env.RETELL_FROM_NUMBER || '',
 
+  // Supabase (shared with the board). Both unset = in-memory fake data.
+  supabaseUrl: process.env.SUPABASE_URL || '',
+  supabaseKey: process.env.SUPABASE_SERVICE_ROLE_KEY || '',
+
   // Keyword pass over the live transcript, every chunk. Flags the session for the console
   // the moment these are said; the agent's own request_human/transfer does the transfer.
   // Whole words, negation-aware (see bypass.js). Not "oxygen" or other conditions: "she's

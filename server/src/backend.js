@@ -1,25 +1,29 @@
 // lookup_address / log_call, per docs/DATA_CONTRACT.md.
-// FAKE until P2's Supabase functions are live: same inputs and outputs, in-memory data.
-// To switch, replace the two function bodies with supabase.rpc(...) calls.
+// Reads and writes Supabase (the same tables the board uses, docs/SUPABASE_SETUP.md) when
+// SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY are set; otherwise, or if the database fails
+// mid-call, it answers from the in-memory fake data below. The line never goes down with it.
 import { route } from './routing.js';
+import { db, dbFailed } from './db.js';
+import { pointInPolygon } from './geo.js';
 
 // One address per scripted test case in team_plan.md, plus a stale and an outside one.
+// Ids match the board's seed (docs/SUPABASE_SETUP.md §3) so memory mode and Supabase agree.
 // `ago` is minutes before the moment of lookup, so "cleared 40 minutes ago" stays true
 // however long the server runs (the fake equivalent of P2's reset script).
-const ADDRESSES = [
-  { id: 'a1', address: '1420 Sunset Mesa Dr', resident_name: 'Maria Lopez', inside_perimeter: true,
+const FAKE_ADDRESSES = [
+  { id: '00000000-0000-4000-8000-000000000001', address: '1420 Sunset Mesa Dr', resident_name: 'Maria Lopez', inside_perimeter: true,
     status: 'cleared', source: 'officer', ago: 40, note: null },
-  { id: 'a2', address: '1515 Via de la Paz', resident_name: 'Harold Kim', inside_perimeter: true,
+  { id: '00000000-0000-4000-8000-000000000002', address: '1515 Via de la Paz', resident_name: 'Harold Kim', inside_perimeter: true,
     status: 'refused', source: 'officer', ago: 25, note: '2 adults staying, 1 on oxygen' },
-  { id: 'a3', address: '16800 Bollinger Dr', resident_name: 'Ruth Adams', inside_perimeter: true,
+  { id: '00000000-0000-4000-8000-000000000003', address: '16800 Bollinger Dr', resident_name: 'Ruth Adams', inside_perimeter: true,
     status: 'unknown', source: null, ago: null, note: null },
-  { id: 'a4', address: '1100 Palisades Dr', resident_name: 'Tom Becker', inside_perimeter: true,
+  { id: '00000000-0000-4000-8000-000000000004', address: '1100 Palisades Dr', resident_name: 'Tom Becker', inside_perimeter: true,
     status: 'cleared', source: 'officer', ago: 360, note: null },
-  { id: 'a5', address: '820 Chautauqua Blvd', resident_name: 'Linda Park', inside_perimeter: true,
+  { id: '00000000-0000-4000-8000-000000000005', address: '820 Chautauqua Blvd', resident_name: 'Linda Park', inside_perimeter: true,
     status: 'self_out', source: 'resident_reply', ago: 55, note: null },
-  { id: 'a6', address: '4512 Crenshaw Blvd', resident_name: 'Dorothy Hayes', inside_perimeter: false,
+  { id: '00000000-0000-4000-8000-000000000006', address: '4512 Crenshaw Blvd', resident_name: 'Dorothy Hayes', inside_perimeter: false,
     status: 'unknown', source: null, ago: null, note: null },
-  { id: 'a7', address: '910 N Vermont Ave', resident_name: 'Kevin Nguyen', inside_perimeter: false,
+  { id: '00000000-0000-4000-8000-000000000007', address: '910 N Vermont Ave', resident_name: 'Kevin Nguyen', inside_perimeter: false,
     status: 'unknown', source: null, ago: null, note: null },
 ];
 
@@ -101,22 +105,66 @@ export function nameMatches(resident, subject) {
   return rest.length === 0 || rest.some((w) => said.has(w));
 }
 
-export async function lookupAddress({ address, subject_name }, now = Date.now()) {
-  const key = addressKey(address);
-  const row = key && ADDRESSES.find((a) => addressKey(a.address) === key);
-  if (!row) return { found: false, address_id: null, name_match: false, status: null, recorded_at: null, note: null, source: null, inside_perimeter: null };
+const NOT_FOUND = { found: false, address_id: null, name_match: false, status: null, recorded_at: null, note: null, source: null, inside_perimeter: null };
+
+// The looting safeguard lives here, in one place for both data sources: nothing about the
+// person (status, time, note, source) unless the caller named them. `structure` is never
+// read, so the agent can't say "the house burned down" (FRONTEND_CONTRACT.md §1).
+function answer(row, latest, subject_name) {
   const match = nameMatches(row.resident_name, subject_name);
   return {
     found: true,
     address_id: row.id,
     name_match: match,
-    // The looting safeguard: nothing about the person unless the caller can name them.
-    status: match ? row.status : null,
-    recorded_at: match && row.ago != null ? new Date(now - row.ago * 60000).toISOString() : null,
-    note: match ? row.note : null,
-    source: match ? row.source : null,
+    status: match ? latest?.status ?? 'unknown' : null,
+    recorded_at: match ? latest?.recorded_at ?? null : null,
+    note: match ? latest?.note ?? null : null,
+    source: match ? latest?.source ?? null : null,
     inside_perimeter: row.inside_perimeter,
   };
+}
+
+function lookupFake(key, subject_name, now) {
+  const row = FAKE_ADDRESSES.find((a) => addressKey(a.address) === key);
+  if (!row) return NOT_FOUND;
+  const latest = row.status === 'unknown' ? null : {
+    status: row.status, note: row.note, source: row.source,
+    recorded_at: row.ago != null ? new Date(now - row.ago * 60000).toISOString() : null,
+  };
+  return answer(row, latest, subject_name);
+}
+
+// Households change rarely, so they're cached briefly; statuses are always read fresh, because
+// an officer's tap a few seconds ago is exactly what the caller is asking about.
+let households = { at: 0, rows: null };
+async function dbHouseholds(now) {
+  if (households.rows && now - households.at < 30_000) return households.rows;
+  const { data, error } = await db.from('addresses').select('id, address, lat, lng, resident_name');
+  if (error) throw error;
+  households = { at: now, rows: data.map((r) => ({ ...r, inside_perimeter: pointInPolygon([Number(r.lat), Number(r.lng)]) })) };
+  return households.rows;
+}
+
+async function lookupDb(key, subject_name, now) {
+  const row = (await dbHouseholds(now)).find((a) => addressKey(a.address) === key);
+  if (!row) return NOT_FOUND;
+  const { data, error } = await db.from('status_log')
+    .select('status, source, note, recorded_at')
+    .eq('address_id', row.id)
+    .order('recorded_at', { ascending: false })
+    .limit(1);
+  if (error) throw error;
+  return answer(row, data[0] ?? null, subject_name);
+}
+
+export async function lookupAddress({ address, subject_name }, now = Date.now()) {
+  const key = addressKey(address);
+  if (!key) return NOT_FOUND;
+  if (db) {
+    try { return await lookupDb(key, subject_name, now); }
+    catch (err) { dbFailed('lookup_address', err); }
+  }
+  return lookupFake(key, subject_name, now);
 }
 
 // One row per call (keyed by Retell's call_id). Within a call the routing only moves up:
@@ -149,7 +197,22 @@ function upsertRow(callId, patch, now) {
     updated_at: new Date(now).toISOString(),
   };
   calls.set(callId, row);
+  persist(row);
   return row;
+}
+
+// Mirror the row into Supabase's `calls` table (docs/sql/calls.sql) for the board and so a
+// redeploy loses nothing. Fire-and-forget: the caller never waits on the database.
+const CALL_COLUMNS = ['call_id', 'mode', 'address', 'address_id', 'subject_name', 'from_number', 'with_them_now',
+  'emergency', 'caller_update', 'last_contact_hours', 'vulnerability', 'red_flags', 'caller_state', 'prior_callers',
+  'routing', 'severity', 'reason', 'simulated', 'created_at', 'updated_at'];
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+function persist(row) {
+  if (!db) return;
+  const out = Object.fromEntries(CALL_COLUMNS.filter((c) => row[c] !== undefined).map((c) => [c, row[c]]));
+  if (out.address_id && !UUID.test(out.address_id)) out.address_id = null;
+  db.from('calls').upsert(out, { onConflict: 'call_id' }).then(({ error }) => { if (error) dbFailed('calls upsert', error); },
+    (err) => dbFailed('calls upsert', err));
 }
 
 // How many *other* people have already called about this address. Repeat callers about one
@@ -183,6 +246,7 @@ export function logUnrouted(session, call, now) {
     subject_name: session?.subject_name ?? null,
     address_id: session?.lookup?.address_id ?? null,
     caller_state: session?.caller_state ?? null,
+    simulated: Boolean(call.simulated),
     routing: transferred ? 'human_now' : 'abandoned_callback',
     severity: transferred ? 5 : ['distressed', 'panicked'].includes(session?.caller_state) ? 4 : 3,
     reason: transferred
