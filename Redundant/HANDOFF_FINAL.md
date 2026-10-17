@@ -31,7 +31,7 @@ Everything else is cut. Do not add numbers to the deck.
 |---|---|---|
 | **57.43% vs 90%** | LAPD answered 57.43% of 911 calls within 15 seconds in 2024, against the state standard required for 911 funding | LAPD Communications Division report |
 | **160+ → empty houses** | LAPD took 160+ evacuation-assistance calls Jan 7; many were not true emergencies (cell networks down, people checking on relatives); officers were dispatched to homes already evacuated | LAPD Palisades AAR |
-| **26 units unknown** | Up to 26 fire units deployed without the knowledge of incident command; the DOC "could not keep accurate resource information" | UL FSRI review / LAFD AAR |
+| **26 units unknown** | Up to 26 fire units deployed without the knowledge of incident command; the DOC "could not keep accurate resource information" | UL FSRI review / LAFD AAR |x
 | **4m03s** | When multiple people reported the same crash, the earliest report arrived 4m03s before official channels (vs 2m41s for a single report) | Young et al., JAMA Surgery 2019 |
 
 ### Precision rules — violating these loses the room
