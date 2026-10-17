@@ -59,6 +59,16 @@ A custom function's response only goes back to the agent's LLM; returning
 `transfer_to_human` tool, which the prompt tells the agent to call after `request_human`
 or on a `BYPASS`/`NOVEL` lane.
 
+## Deploy
+
+Live at `https://usc-dual-hacks-production.up.railway.app` (Railway project
+`dazzling-laughter`). **Pushing does not deploy**: Railway's GitHub app isn't installed on
+this repo, so deploy explicitly after pushing:
+
+    npm run deploy     # needs `railway login` once
+
+Every deploy restarts the server and clears in-memory state. Never deploy mid-demo.
+
 ## Fan-out (threshold → outbound sweep)
 
 After each `report_incident` reply, `cluster-stub.js` counts unique firsthand callers per
