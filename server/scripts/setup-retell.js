@@ -97,7 +97,7 @@ const inboundId = await upsertAgent({
   toolList: allTools,
   startSpeaker: 'agent',
   beginMessage:
-    "This is the LA Community Line. I'm an automated assistant and I can put you through to a person. First — is anyone hurt or in immediate danger?",
+    "LA Community Line. I'm automated, and I can get you a person. Is anyone hurt or in danger?",
 });
 
 const outboundId = await upsertAgent({
