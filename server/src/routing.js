@@ -80,6 +80,10 @@ function routeOnFacts(call, lookup, now) {
   if (lookup?.inside_perimeter) {
     return { routing: 'priority_queue', severity: 4, reason: `${status || 'no status'} inside the perimeter` };
   }
+  // Nothing on record for this address: a person decides. Never "follow-up" or "answered".
+  if (lookup && lookup.found === false) {
+    return { routing: 'priority_queue', severity: 3, reason: 'address not in our records' };
+  }
   if (call.mode === 'routine') {
     const score = routineScore(call);
     return score >= 4

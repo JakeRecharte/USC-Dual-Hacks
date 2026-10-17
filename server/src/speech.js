@@ -15,7 +15,9 @@ export function when(iso, now) {
 
 export function sayForLookup(lookup, subjectName, now, freshMin) {
   if (!lookup.found) {
-    return "I don't have that address in our records for the evacuation area.";
+    return lookup.inside_perimeter
+      ? "I don't have that house in our records yet, but that street is inside the evacuation area."
+      : "I don't have that address in our records for the evacuation area.";
   }
   if (!lookup.name_match) {
     return "I can only share the status of an address with someone who can give the resident's full name. Can you tell me their first and last name?";

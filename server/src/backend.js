@@ -146,6 +146,21 @@ export function nameMatches(resident, subject) {
 
 const NOT_FOUND = { found: false, address_id: null, name_match: false, status: null, recorded_at: null, note: null, source: null, inside_perimeter: null };
 
+// A house we don't have, on a street we do: it's in the same area. (A real call: "861 Alma
+// Real Drive" isn't seeded, 124 and 760 are, so it read as "area unknown" and was treated
+// as a routine check during an evacuation.) True/false only if every known house agrees.
+function streetArea(rows, address) {
+  const key = addressKey(address);
+  if (!key) return null;
+  const street = key.split(' ').slice(1).join(' ');
+  const same = rows.filter((r) => similarity(street, addressKey(r.address)?.split(' ').slice(1).join(' ') ?? '') >= 0.85);
+  if (!same.length) return null;
+  if (same.every((r) => r.inside_perimeter)) return true;
+  if (same.every((r) => !r.inside_perimeter)) return false;
+  return null;
+}
+const notFound = (rows, address) => ({ ...NOT_FOUND, inside_perimeter: streetArea(rows, address) });
+
 // The looting safeguard lives here, in one place for both data sources: nothing about the
 // person (status, time, note, source) unless the caller named them. `structure` is never
 // read, so the agent can't say "the house burned down" (FRONTEND_CONTRACT.md §1).
@@ -178,7 +193,7 @@ function fakeLatest(row, now) {
 
 function lookupFake(address, subject_name, now) {
   const row = findHousehold(FAKE_ADDRESSES, address, subject_name);
-  if (!row) return NOT_FOUND;
+  if (!row) return notFound(FAKE_ADDRESSES, address);
   return answer(row, fakeLatest(row, now), subject_name);
 }
 
@@ -222,8 +237,9 @@ async function dbHouseholds(now) {
 }
 
 async function lookupDb(address, subject_name, now) {
-  const row = findHousehold(await dbHouseholds(now), address, subject_name);
-  if (!row) return NOT_FOUND;
+  const rows = await dbHouseholds(now);
+  const row = findHousehold(rows, address, subject_name);
+  if (!row) return notFound(rows, address);
   const { data, error } = await db.from('status_log')
     .select('status, source, note, recorded_at')
     .eq('address_id', row.id)

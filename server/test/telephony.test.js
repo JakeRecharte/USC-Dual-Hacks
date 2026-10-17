@@ -392,8 +392,32 @@ test('misheard house number: same street + the named resident finds the house; a
 test('the agent and the board use the same fire perimeter', async () => {
   const { readFile } = await import('node:fs/promises');
   const { PERIMETER } = await import('../src/geo.js');
-  const web = await readFile(new URL('../../web/src/lib/addresses.ts', import.meta.url), 'utf8');
-  const block = /export const PERIMETER[^=]*=\s*\[([\s\S]*?)\n\];/.exec(web)[1];
+  // The board defines it in zones.ts (moved there from addresses.ts at 12:50).
+  const files = ['../../web/src/lib/zones.ts', '../../web/src/lib/addresses.ts'];
+  const sources = await Promise.all(files.map((f) => readFile(new URL(f, import.meta.url), 'utf8').catch(() => '')));
+  const block = sources.map((t) => /export const PERIMETER[^=]*=\s*\[([\s\S]*?)\n\];/.exec(t)?.[1]).find(Boolean);
   const board = [...block.matchAll(/\[\s*(-?\d+\.\d+)\s*,\s*(-?\d+\.\d+)\s*\]/g)].map((m) => [Number(m[1]), Number(m[2])]);
-  assert.deepEqual(PERIMETER, board, 'server/src/geo.js PERIMETER is out of date: copy it from web/src/lib/addresses.ts');
+  assert.deepEqual(PERIMETER, board, 'server/src/geo.js PERIMETER is out of date: copy it from web/src/lib/zones.ts');
+});
+
+// ── Real call 1:01 PM: "861 Alma Real Drive, Pacific Palisades" (not seeded) ──
+
+test('a house we do not have, on a street we do, takes that street\'s area', async () => {
+  // Fake data: 1420 Sunset Mesa is inside, 4512 Crenshaw outside.
+  const inside = await lookupAddress({ address: '1500 Sunset Mesa Dr', subject_name: 'Sergio Luna' }, now);
+  assert.equal(inside.found, false);
+  assert.equal(inside.inside_perimeter, true);
+  assert.match(sayForLookup(inside, 'Sergio Luna', now, FRESH_MIN), /street is inside the evacuation area/);
+  assert.equal((await lookupAddress({ address: '9 Crenshaw Blvd', subject_name: 'X Y' }, now)).inside_perimeter, false);
+  assert.equal((await lookupAddress({ address: '9 Nowhere Ln', subject_name: 'X Y' }, now)).inside_perimeter, null);
+});
+
+test('an address not in our records never gets a follow-up or an agent-only answer', async () => {
+  const { row } = await run({ mode: 'routine', address: '9 Nowhere Ln', subject_name: 'Sergio Luna', with_them_now: false,
+    last_contact_hours: 0.67, vulnerability: { age: 46, lives_alone: false }, red_flags: {}, call_id: 'nf1', from_number: '+1310555900' });
+  assert.equal(row.routing, 'priority_queue');
+  const { row: inArea } = await run({ mode: 'routine', address: '1500 Sunset Mesa Dr', subject_name: 'Sergio Luna', with_them_now: false,
+    last_contact_hours: 0.67, red_flags: {}, call_id: 'nf2', from_number: '+1310555901' });
+  assert.equal(inArea.routing, 'priority_queue');
+  assert.equal(inArea.severity, 4);
 });

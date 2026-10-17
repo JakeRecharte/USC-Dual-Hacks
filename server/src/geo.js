@@ -1,4 +1,4 @@
-// The fire perimeter, identical to web/src/lib/addresses.ts PERIMETER (a test fails if they drift) and web/src/lib/geo.ts,
+// The fire perimeter, identical to web/src/lib/zones.ts PERIMETER (a test fails if they drift) and web/src/lib/geo.ts,
 // so the agent and the board always agree on who is inside. `inside_perimeter` is not a
 // column: the contract keeps the perimeter as one polygon and computes it.
 
