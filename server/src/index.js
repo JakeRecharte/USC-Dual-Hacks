@@ -49,7 +49,7 @@ const argsOf = (body) => {
 app.post('/fn/lookup_address', { preHandler: verifyRetell }, async (req, reply) => {
   const { call, args } = argsOf(req.body);
   const now = Date.now();
-  const lookup = await backend.lookupAddress(args);
+  const lookup = await backend.lookupAddress(args, now);
   const say = sayForLookup(lookup, args.subject_name, now, FRESH_MIN);
 
   // Answer first: the caller is listening to silence until this returns.

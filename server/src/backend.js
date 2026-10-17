@@ -3,25 +3,24 @@
 // To switch, replace the two function bodies with supabase.rpc(...) calls.
 import { route } from './routing.js';
 
-const BOOT = Date.now();
-const ago = (min) => new Date(BOOT - min * 60000).toISOString();
-
 // One address per scripted test case in team_plan.md, plus a stale and an outside one.
+// `ago` is minutes before the moment of lookup, so "cleared 40 minutes ago" stays true
+// however long the server runs (the fake equivalent of P2's reset script).
 const ADDRESSES = [
   { id: 'a1', address: '1420 Sunset Mesa Dr', resident_name: 'Maria Lopez', inside_perimeter: true,
-    status: 'cleared', source: 'officer', recorded_at: ago(40), note: null },
+    status: 'cleared', source: 'officer', ago: 40, note: null },
   { id: 'a2', address: '1515 Via de la Paz', resident_name: 'Harold Kim', inside_perimeter: true,
-    status: 'refused', source: 'officer', recorded_at: ago(25), note: '2 adults staying, 1 on oxygen' },
+    status: 'refused', source: 'officer', ago: 25, note: '2 adults staying, 1 on oxygen' },
   { id: 'a3', address: '16800 Bollinger Dr', resident_name: 'Ruth Adams', inside_perimeter: true,
-    status: 'unknown', source: null, recorded_at: null, note: null },
+    status: 'unknown', source: null, ago: null, note: null },
   { id: 'a4', address: '1100 Palisades Dr', resident_name: 'Tom Becker', inside_perimeter: true,
-    status: 'cleared', source: 'officer', recorded_at: ago(360), note: null },
+    status: 'cleared', source: 'officer', ago: 360, note: null },
   { id: 'a5', address: '820 Chautauqua Blvd', resident_name: 'Linda Park', inside_perimeter: true,
-    status: 'self_out', source: 'resident_reply', recorded_at: ago(55), note: null },
+    status: 'self_out', source: 'resident_reply', ago: 55, note: null },
   { id: 'a6', address: '4512 Crenshaw Blvd', resident_name: 'Dorothy Hayes', inside_perimeter: false,
-    status: 'unknown', source: null, recorded_at: null, note: null },
+    status: 'unknown', source: null, ago: null, note: null },
   { id: 'a7', address: '910 N Vermont Ave', resident_name: 'Kevin Nguyen', inside_perimeter: false,
-    status: 'unknown', source: null, recorded_at: null, note: null },
+    status: 'unknown', source: null, ago: null, note: null },
 ];
 
 const SUFFIX = { drive: 'dr', street: 'st', avenue: 'ave', boulevard: 'blvd', road: 'rd', lane: 'ln',
@@ -43,7 +42,7 @@ export function nameMatches(resident, subject) {
   return need.length > 0 && need.every((w) => said.has(w));
 }
 
-export async function lookupAddress({ address, subject_name }) {
+export async function lookupAddress({ address, subject_name }, now = Date.now()) {
   const key = addressKey(address);
   const row = key && ADDRESSES.find((a) => addressKey(a.address) === key);
   if (!row) return { found: false, address_id: null, name_match: false, status: null, recorded_at: null, note: null, source: null, inside_perimeter: null };
@@ -54,7 +53,7 @@ export async function lookupAddress({ address, subject_name }) {
     name_match: match,
     // The looting safeguard: nothing about the person unless the caller can name them.
     status: match ? row.status : null,
-    recorded_at: match ? row.recorded_at : null,
+    recorded_at: match && row.ago != null ? new Date(now - row.ago * 60000).toISOString() : null,
     note: match ? row.note : null,
     source: match ? row.source : null,
     inside_perimeter: row.inside_perimeter,
@@ -64,7 +63,7 @@ export async function lookupAddress({ address, subject_name }) {
 const calls = [];
 
 export async function logCall(payload, now) {
-  const lookup = await lookupAddress(payload);
+  const lookup = await lookupAddress(payload, now);
   const decision = route(payload, lookup, now);
   const row = {
     id: `call_${calls.length + 1}`,
