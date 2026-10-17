@@ -19,7 +19,8 @@ export function route(call, lookup, now) {
   const ageMin = lookup?.recorded_at ? (now - Date.parse(lookup.recorded_at)) / 60000 : Infinity;
 
   if (call.with_them_now || call.emergency) {
-    return { routing: 'human_now', severity: 5, reason: call.with_them_now ? 'caller is with them now' : 'emergency' };
+    return { routing: 'human_now', severity: 5,
+      reason: call.with_them_now ? 'caller is with them now' : (call.emergency_reason || 'emergency') };
   }
   if (call.caller_update) {
     return { routing: 'priority_queue', severity: 4, reason: `caller update: ${call.caller_update}` };

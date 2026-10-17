@@ -75,6 +75,7 @@ app.post('/fn/log_call', { preHandler: verifyRetell }, async (req, reply) => {
     with_them_now: args.with_them_now === true,
     // Emergency words heard mid-sentence count even if the agent didn't flag them.
     emergency: args.emergency === true || Boolean(session?.bypass_reason),
+    emergency_reason: session?.bypass_reason || null,
     caller_update: args.caller_update || null,
     last_contact_hours: args.last_contact_hours ?? null,
     vulnerability: args.vulnerability || {},
