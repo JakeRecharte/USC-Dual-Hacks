@@ -471,6 +471,12 @@ export function logTransferFailed(callId, fromNumber, detail, now) {
 
 export const getCall = (callId) => calls.get(callId);
 
+// npm run reset-demo clears the database; this clears the server's in-memory copy too, or
+// repeat-caller counts would include calls from before the reset.
+export function forgetAllCalls() {
+  calls.clear();
+}
+
 // Retell's playground (scripts/eval-agent.js) sends every conversation as call_id "playground";
 // the harness forgets it between scenarios so one scenario's state can't leak into the next.
 export function forgetCall(callId) {

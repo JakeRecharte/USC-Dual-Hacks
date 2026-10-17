@@ -16,5 +16,6 @@ export function upsert(callId, patch) {
 
 export const get = (callId) => sessions.get(callId);
 export const remove = (callId) => sessions.delete(callId);
+export const clear = () => sessions.clear();
 export const all = () => [...sessions.values()];
 export const active = () => all().filter((s) => !s.ended_at);

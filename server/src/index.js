@@ -249,6 +249,13 @@ app.post('/webhook/retell', { preHandler: verifyRetell }, async (req, reply) => 
   });
 });
 
+// Demo reset (scripts/reset-demo.js): forget every in-memory call and session. Signed like Retell.
+app.post('/dev/reset-memory', { preHandler: verifyRetell }, async () => {
+  sessions.clear();
+  backend.forgetAllCalls();
+  return { ok: true };
+});
+
 // Eval harness only: forget the shared "playground" call between scenarios. Signed like Retell.
 app.post('/dev/reset-playground', { preHandler: verifyRetell }, async () => {
   sessions.remove('playground');

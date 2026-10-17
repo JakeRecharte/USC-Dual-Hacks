@@ -9,6 +9,8 @@
 // lines. The DB stores absolute times, so without this "cleared 40 minutes ago" is two hours
 // old by the afternoon and demo case 1 stops working.
 import { readFile } from 'node:fs/promises';
+import { sign } from 'retell-sdk';
+import { config } from '../src/config.js';
 import { db } from '../src/db.js';
 
 if (!db) {
@@ -88,3 +90,14 @@ if (!process.argv.includes('--keep-calls')) {
 }
 
 console.log(`reset: ${households.length} households synced (${stray.length} stray removed), ${statuses.length} statuses re-based to now, call log ${process.argv.includes('--keep-calls') ? 'kept' : 'cleared'}`);
+
+// The telephony server keeps recent calls in memory for repeat-caller counts; clear that too.
+const server = process.env.PUBLIC_URL || 'https://usc-dual-hacks-production.up.railway.app';
+try {
+  const raw = '{}';
+  const res = await fetch(`${server}/dev/reset-memory`, { method: 'POST', body: raw,
+    headers: { 'content-type': 'application/json', 'x-retell-signature': await sign(raw, config.retellApiKey) } });
+  console.log(`server memory: ${res.ok ? 'cleared' : `not cleared (${res.status})`}`);
+} catch (err) {
+  console.log(`server memory: not cleared (${err.message})`);
+}
