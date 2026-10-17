@@ -102,6 +102,14 @@ export function sortByUrgency(now: number) {
   };
 }
 
+/** Share of a zone still unresolved, banded. */
+export function zoneUrgency(share: number): Urgency {
+  if (share >= 0.6) return 'critical';
+  if (share >= 0.35) return 'high';
+  if (share >= 0.1) return 'watch';
+  return 'clear';
+}
+
 export interface ZoneSummary {
   zone_id: string;
   total: number;
@@ -134,7 +142,10 @@ export function zoneSummaries(addresses: AddressState[], now: number): ZoneSumma
         counts,
         destroyed: list.filter((a) => a.structure === 'destroyed').length,
         // A zone is as urgent as its worst address, so one refusal keeps it red.
-        urgency: counts.critical > 0 ? 'critical' : counts.high > 0 ? 'high' : counts.watch > 0 ? 'watch' : 'clear',
+        // Proportional, not worst-case. A zone of three hundred homes always contains one
+        // refusal, so "worst address wins" paints every zone red and tells a dispatcher
+        // nothing. What matters is how much of the zone is still outstanding.
+        urgency: zoneUrgency(unresolved / Math.max(list.length, 1)),
         lat: list.reduce((s, a) => s + a.lat, 0) / list.length,
         lng: list.reduce((s, a) => s + a.lng, 0) / list.length,
       } satisfies ZoneSummary;

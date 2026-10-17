@@ -12,7 +12,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 // Explicit .ts on these two because they are value imports and the unit tests resolve this
 // module through Node's own loader, which does not guess extensions. The type-only imports
 // below are erased, so they need none.
-import { PERIMETER } from './addresses.ts';
+import { PERIMETER } from './zones.ts';
 import { pointInPolygon } from './geo.ts';
 import type { AddressState, Source, Status, Structure } from './types';
 

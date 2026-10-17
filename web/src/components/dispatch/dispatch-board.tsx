@@ -256,7 +256,15 @@ function Legend({ mode }: { mode: MapMode }) {
         ))}
       </ul>
 
-      <p className="mt-2 border-t border-paper-rule-soft pt-2 text-[11px] leading-snug text-paper-soft">
+      <div className="mt-2 flex items-center gap-2 border-t border-paper-rule-soft pt-2 text-[11px] text-paper-ink-2">
+        <span
+          aria-hidden
+          className="inline-block h-2.5 w-2.5 shrink-0 rounded-[2px]"
+          style={{ background: '#7d8a96', opacity: 0.35 }}
+        />
+        Building, no record
+      </div>
+      <p className="mt-1.5 text-[11px] leading-snug text-paper-soft">
         Dashed outline is the active fire perimeter.
       </p>
     </div>
@@ -422,6 +430,9 @@ function CallQueue({
   );
 }
 
+/** How many rows the lists render. The rest are counted, not drawn. */
+const LIST_LIMIT = 60;
+
 function DoorKnockPanel({
   knocks,
   now,
@@ -433,6 +444,7 @@ function DoorKnockPanel({
   onFocus: (id: string) => void;
   focusId: string | null;
 }) {
+  const shown = knocks.slice(0, LIST_LIMIT);
   return (
     <section className="flex min-h-0 flex-1 flex-col rounded-2xl border border-line bg-panel">
       <header className="flex items-baseline justify-between gap-2 border-b border-line px-4 py-3">
@@ -446,7 +458,7 @@ function DoorKnockPanel({
           </p>
         ) : (
           <ul className="divide-y divide-line">
-            {knocks.map((a) => (
+            {shown.map((a) => (
               <li key={a.id}>
                 <button
                   type="button"
@@ -474,6 +486,12 @@ function DoorKnockPanel({
                 </button>
               </li>
             ))}
+            {knocks.length > shown.length && (
+              <li className="px-4 py-3 text-xs text-muted">
+                {(knocks.length - shown.length).toLocaleString()} more, worst first. Work the
+                top of the list.
+              </li>
+            )}
           </ul>
         )}
       </div>

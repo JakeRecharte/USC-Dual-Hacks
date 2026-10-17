@@ -87,6 +87,15 @@ anon key but shows an amber warning, because that state should not ship.
   raster tiles cannot. Tiles and glyphs come from OpenFreeMap, keyless. If the network is
   down the basemap is blank but the perimeter, zones and households still draw, because they
   come from local data.
-- **Geography is real.** The perimeter traces Pacific Palisades from the coast into Santa Ynez
-  Canyon, and the eight zones are its actual districts. `inside_perimeter` is computed from
-  the polygon, never stored, and a test asserts it agrees with every household's zone.
+- **Geography is real, down to the house.** Every household sits on an OpenStreetMap dwelling
+  footprint inside the perimeter, and `public/buildings.json` carries all 8,103 outlines so
+  the map draws the actual shape of each building rather than a pin. Zones are k-means
+  clusters over those footprints, named for the district each covers, so `ZONE_ORDER` in
+  `zones.ts` is cluster order and must stay in step with `zones` in `buildings.json`.
+  Addresses and residents are invented; the geography is not.
+- **The basemap looks sparse on its own.** OpenFreeMap's vector tiles top out at z14 and drop
+  most small buildings — 192 of them inside this perimeter, against 8,103 in OpenStreetMap.
+  That is why the outlines are shipped as data instead of read from the basemap.
+- **Regenerating the data** is a one-off script, not part of the build. The household sites in
+  `src/lib/household-sites.ts` and `public/buildings.json` were produced from an Overpass
+  query; `docs/seed.sql` is generated from `src/lib/addresses.ts`.
