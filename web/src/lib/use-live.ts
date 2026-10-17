@@ -1,6 +1,9 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import type { SupabaseClient } from '@supabase/supabase-js';
+import { browserClient } from './supabase';
+import { fetchBoard } from './supabase-data';
 import { CALLER_STATE_RANK, ROUTING_RANK } from './types';
 import type { AddressState, CallRow, CallerState, Routing } from './types';
 
@@ -16,15 +19,108 @@ export function useNow(intervalMs = 15_000): number {
 
 export type Connection = 'connecting' | 'live' | 'offline';
 
+export interface BoardSession {
+  mode: 'supabase' | 'memory';
+  url?: string;
+  anonKey?: string;
+  token?: string;
+  gated?: boolean;
+}
+
 /**
- * Status for every address, pushed from /api/events. The snapshot arrives on connect and on
- * every reconnect, so a dropped stream heals itself without a reload.
+ * Status for every address, live.
+ *
+ * Two transports, chosen by what is configured (see lib/supabase.ts):
+ *
+ *   supabase — the browser reads Postgres and subscribes to Realtime directly, using a token
+ *              minted for the signed-in role. Nothing live goes through our own server, so
+ *              this works on Vercel where consecutive requests hit different instances.
+ *
+ *   memory   — our own SSE feed off the in-process store. One server only, but no database.
+ *
+ * Either way the shape handed to the portals is identical.
  */
 export function useAddresses() {
   const [addresses, setAddresses] = useState<AddressState[]>([]);
   const [connection, setConnection] = useState<Connection>('connecting');
+  const [session, setSession] = useState<BoardSession | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
+  // Which transport to use is a server question, so ask before connecting to anything.
   useEffect(() => {
+    let live = true;
+    fetch('/api/db-token')
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`db-token ${r.status}`))))
+      .then((data: BoardSession) => {
+        if (live) setSession(data);
+      })
+      .catch(() => {
+        // Fall back to the SSE feed rather than showing an empty board.
+        if (live) setSession({ mode: 'memory' });
+      });
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  // --- Supabase transport ---
+  useEffect(() => {
+    if (session?.mode !== 'supabase' || !session.token) return;
+
+    let client: SupabaseClient | null = null;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+
+    try {
+      client = browserClient(session.token);
+    } catch {
+      setConnection('offline');
+      setError('Could not reach the database.');
+      return;
+    }
+
+    const load = async () => {
+      try {
+        const rows = await fetchBoard(client!);
+        if (cancelled) return;
+        setAddresses(rows);
+        setConnection('live');
+        setError(null);
+      } catch (e) {
+        if (cancelled) return;
+        setConnection('offline');
+        setError(e instanceof Error ? e.message : 'Could not read the board.');
+      }
+    };
+
+    void load();
+
+    // Any change refetches the board. Two small queries over ~30 rows, which is cheaper than
+    // merging partial row payloads correctly and cannot drift from what the database holds.
+    const refetch = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => void load(), 150);
+    };
+
+    const channel = client
+      .channel('line-board')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'status_log' }, refetch)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'addresses' }, refetch)
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') setConnection('live');
+        else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') setConnection('offline');
+      });
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+      void client?.removeChannel(channel);
+    };
+  }, [session]);
+
+  // --- SSE transport ---
+  useEffect(() => {
+    if (session?.mode !== 'memory') return;
     const source = new EventSource('/api/events');
 
     source.addEventListener('snapshot', (e) => {
@@ -47,14 +143,23 @@ export function useAddresses() {
     source.onerror = () => setConnection((c) => (c === 'live' ? 'offline' : c));
 
     return () => source.close();
-  }, []);
+  }, [session]);
 
   /** Optimistic write, so an officer's tap paints before the round trip finishes. */
   const patchLocal = useCallback((row: AddressState) => {
     setAddresses((prev) => prev.map((a) => (a.id === row.id ? row : a)));
   }, []);
 
-  return { addresses, connection, patchLocal, setAddresses };
+  return {
+    addresses,
+    connection,
+    patchLocal,
+    setAddresses,
+    mode: session?.mode ?? null,
+    /** False when reads are not behind the passcode gate: no SUPABASE_JWT_SECRET. */
+    gated: session?.mode === 'supabase' ? session.gated !== false : true,
+    error,
+  };
 }
 
 const TELEPHONY = process.env.NEXT_PUBLIC_TELEPHONY_URL?.replace(/\/$/, '') ?? '';

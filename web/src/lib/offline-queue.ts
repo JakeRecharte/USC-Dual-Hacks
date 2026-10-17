@@ -78,7 +78,12 @@ export function useOfflineQueue(onApplied: (rows: AddressState[]) => void) {
       });
       if (!res.ok) throw new Error(`status ${res.status}`);
 
-      const { applied: rows } = (await res.json()) as { applied: AddressState[] };
+      // In Supabase mode the server returns ids, not rows, because Realtime delivers the
+      // authoritative rows instead. Only objects are passed on as patches.
+      const body = (await res.json()) as { applied?: unknown[] };
+      const rows = (body.applied ?? []).filter(
+        (r): r is AddressState => typeof r === 'object' && r !== null && 'id' in r && 'status' in r,
+      );
       // Only the items we just sent are cleared; a tap made during the request survives.
       const sent = new Set(batch.map((b) => b.queue_id));
       const left = read().filter((u) => !sent.has(u.queue_id));

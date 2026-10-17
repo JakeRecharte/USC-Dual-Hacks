@@ -30,7 +30,7 @@ const ZoneMap = dynamic(() => import('./zone-map').then((m) => m.ZoneMap), {
 });
 
 export function DispatchBoard() {
-  const { addresses, connection } = useAddresses();
+  const { addresses, connection, mode: dataMode, gated, error } = useAddresses();
   const { calls, connection: callFeed, upsert } = useCalls();
   const now = useNow(15_000);
 
@@ -76,11 +76,17 @@ export function DispatchBoard() {
               Dispatch — Palisades incident
             </h1>
             <p className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-muted">
-              <ConnectionDot state={connection} label={`Status feed ${connection}`} />
+              <ConnectionDot
+                state={connection}
+                label={`${dataMode === 'supabase' ? 'Database' : 'Status feed'} ${connection}`}
+              />
               <ConnectionDot
                 state={callFeed}
                 label={telephonyConfigured ? `Call feed ${callFeed}` : 'Call feed not configured'}
               />
+              {dataMode === 'memory' && (
+                <span className="text-watch">in-memory — not shared across servers</span>
+              )}
             </p>
           </div>
         </div>
@@ -90,6 +96,19 @@ export function DispatchBoard() {
           <SignOutButton />
         </div>
       </header>
+
+      {error && (
+        <p role="alert" className="mx-4 mt-4 rounded-xl border border-critical/40 bg-critical/10 px-3.5 py-2.5 text-xs leading-relaxed text-critical">
+          {error}
+        </p>
+      )}
+      {!gated && (
+        <p className="mx-4 mt-4 rounded-xl border border-watch/40 bg-watch/10 px-3.5 py-2.5 text-xs leading-relaxed text-watch">
+          Database reads are not behind the shift code: SUPABASE_JWT_SECRET is not set, so the
+          anon key alone can read resident names. Set it before this is reachable publicly —
+          see docs/SUPABASE_SETUP.md.
+        </p>
+      )}
 
       <div className="grid flex-1 gap-4 p-4 lg:grid-cols-[minmax(0,1fr)_380px]">
         <section className="flex min-w-0 flex-col gap-4">
