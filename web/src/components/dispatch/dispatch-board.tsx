@@ -2,7 +2,10 @@
 
 import dynamic from 'next/dynamic';
 import { useMemo, useState } from 'react';
-import { ZONE_NAMES } from '@/lib/addresses';
+// From zones.ts, not addresses.ts: the latter re-exports this but also pulls in the
+// household site list, which would ship all 8,103 centroids to the browser. addresses.ts
+// says so in its own header, and this import was quietly undoing it.
+import { ZONE_NAMES } from '@/lib/zones';
 import {
   HEAT_STOPS,
   URGENCY_COLOR,
