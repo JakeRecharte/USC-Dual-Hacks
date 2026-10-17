@@ -12,12 +12,19 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'That code does not match.' }, { status: 401 });
   }
 
+  // Secure only when the request actually arrived over HTTPS, not merely because this is a
+  // production build. During the demo the officer's phone reaches the laptop over plain HTTP
+  // on the LAN, and a browser silently drops a Secure cookie on that origin, which looks
+  // exactly like a wrong passcode. Behind a proxy, trust x-forwarded-proto.
+  const proto = req.headers.get('x-forwarded-proto')?.split(',')[0].trim();
+  const https = proto ? proto === 'https' : new URL(req.url).protocol === 'https:';
+
   const res = NextResponse.json({ role, redirect: HOME_FOR[role] });
   res.cookies.set(ROLE_COOKIE, await signRole(role), {
     httpOnly: true,
     sameSite: 'lax',
     path: '/',
-    secure: process.env.NODE_ENV === 'production',
+    secure: https,
     maxAge: 60 * 60 * 12, // one shift
   });
   return res;
