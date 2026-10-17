@@ -1,12 +1,15 @@
-// Stand-in for Person B's engine. Same contract, canned answers. Swap the import in
-// index.js for the real engine.triage() when it lands; nothing else should change.
+// Stand-in for Person B's engine. Same contract; swap the import in index.js when it lands.
 //
 // THE CONTRACT (frozen):
-//   in:  { incident_type, street, cross_street, firsthand, people_affected, lang, call_id, from_number }
+//   in:  signal { incident_type, street, cross_street, firsthand, people_affected, lang, call_id, from_number }
+//        world  { cluster }   what we already know about this incident, or null
+//        now    injected; the engine never reads the clock
 //   out: { lane, say, transferTo?, briefForHuman? }
 //   lane ∈ BYPASS | ANSWERABLE | NOVEL | CORROBORATING
+//
+// Default is escalate: a call goes to a human unless it earns another lane.
 
-export function triage(signal, now) {
+export function triage(signal, world, now) {
   if (signal.incident_type === 'medical') {
     return {
       lane: 'BYPASS',
@@ -15,17 +18,24 @@ export function triage(signal, now) {
       briefForHuman: brief(signal, now),
     };
   }
-  if (!signal.street) {
+
+  // No street, or nothing on record for this incident: only a human can send resources
+  // somewhere new.
+  if (!signal.street || !world?.cluster) {
     return {
       lane: 'NOVEL',
-      say: "I'm going to get you to a person who can help. Stay on the line.",
+      say: "Thank you, this is the first report we have of this. I'm connecting you to a dispatcher now. Please stay on the line.",
       transferTo: 'dispatcher',
       briefForHuman: brief(signal, now),
     };
   }
+
+  const { sources, created_at } = world.cluster;
+  const minutes = Math.round((now - created_at) / 60000);
+  const when = minutes < 1 ? 'less than a minute ago' : `about ${minutes} ${minutes === 1 ? 'minute' : 'minutes'} ago`;
   return {
     lane: 'CORROBORATING',
-    say: `Thank you. We already have reports of a ${signal.incident_type} near ${signal.street}, and your report has been added. If anyone is hurt or in danger, tell me now.`,
+    say: `Thank you. We've had ${sources} ${sources === 1 ? 'report' : 'reports'} of a ${signal.incident_type} near ${signal.street}, the first ${when}, and yours has been added. If anyone is hurt or in danger, tell me now.`,
   };
 }
 

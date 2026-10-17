@@ -1,13 +1,12 @@
 {
   "name": "server",
   "version": "1.0.0",
-  "description": "Line telephony server (Retell webhooks + outbound)",
+  "description": "Line telephony server (Retell inbound webhooks)",
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
     "dev": "node --watch src/index.js",
     "simulate": "node scripts/simulate.js",
-    "test-outbound": "node scripts/test-outbound.js",
     "setup-retell": "node scripts/setup-retell.js",
     "test": "node --test \"test/*.test.js\"",
     "deploy": "cd .. && railway up --ci -p e4a0f795-23e0-45f4-bb91-54dfd4f40a73 -e production -s USC-Dual-Hacks -m \"$(git rev-parse --short HEAD)\""

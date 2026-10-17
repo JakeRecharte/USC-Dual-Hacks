@@ -6,8 +6,6 @@ import { triage } from './engine-stub.js';
 import { checkBypass, callerText } from './bypass.js';
 import * as sessions from './sessions.js';
 import * as clusters from './cluster-stub.js';
-import { targetOutbound } from './targets-stub.js';
-import { fanOut, allDials } from './fanout.js';
 
 const app = Fastify({ logger: { level: 'info' } });
 
@@ -58,25 +56,21 @@ app.post('/fn/report_incident', { preHandler: verifyRetell }, async (req, reply)
     from_number: call.from_number,
   };
 
-  const decision = triage(signal, now);
+  const decision = triage(signal, { cluster: clusters.lookup(signal) }, now);
+  const transfer = decision.lane === 'BYPASS' || decision.lane === 'NOVEL';
 
   // Answer first: the caller is listening to silence until this returns.
-  reply.send({ lane: decision.lane, say: decision.say, transfer: decision.lane === 'BYPASS' });
+  reply.send({ lane: decision.lane, say: decision.say, transfer });
+
+  // Recorded in the same tick as the lookup, so two concurrent callers never hear the
+  // same count. Cheap and synchronous; anything slow goes in setImmediate below.
+  const cluster = clusters.observe(signal, now);
 
   setImmediate(() => {
     sessions.addSignal(signal.call_id, signal, decision);
     sessions.bus.emit('signal', { signal, decision, now, simulated: Boolean(call.simulated) });
+    if (cluster) sessions.bus.emit('cluster', cluster);
     req.log.info({ call_id: signal.call_id, lane: decision.lane, signal }, 'triaged');
-
-    // Threshold check runs after the caller already has their answer.
-    const seen = clusters.observe(signal, now);
-    if (!seen) return;
-    sessions.bus.emit('cluster', { ...clusters.all().find((c) => c.id === seen.cluster.id) });
-    if (seen.confirmed) {
-      fanOut(seen.cluster, targetOutbound(seen.cluster), now)
-        .then((summary) => summary && req.log.warn({ summary }, 'ALERT fan-out'))
-        .catch((err) => req.log.error({ err }, 'fan-out failed'));
-    }
   });
 });
 
@@ -135,18 +129,16 @@ const snapshot = () => ({
   active: sessions.active().length,
   sessions: sessions.all(),
   clusters: clusters.all(),
-  dials: allDials(),
 });
 
 app.get('/sessions', async () => ({ active: sessions.active().length, sessions: sessions.all() }));
 app.get('/clusters', async () => clusters.all());
-app.get('/dials', async () => allDials());
 app.get('/state', async () => snapshot());
 app.get('/health', async () => ({ ok: true }));
 
 // Server-sent events: every bus event, live. The console opens one EventSource and never
 // polls. First message is a full snapshot so a reconnect starts from current state.
-const STREAMED = ['signal', 'bypass', 'cluster', 'alert', 'dial', 'sweep', 'call_started', 'call_ended', 'call_analyzed'];
+const STREAMED = ['signal', 'bypass', 'cluster', 'call_started', 'call_ended', 'call_analyzed'];
 app.get('/events', (req, reply) => {
   reply.hijack();
   reply.raw.writeHead(200, {

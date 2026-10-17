@@ -1,9 +1,8 @@
-// Creates or updates the Retell agents from the files in retell/, so the agent config
-// lives in git instead of the dashboard. Safe to re-run: run it again whenever ngrok
-// restarts or the prompt changes.
+// Creates or updates the Line Intake agent from the files in retell/, so the agent config
+// lives in git instead of the dashboard. Safe to re-run whenever the prompt changes.
 //
-//   npm run setup-retell                     uses the running ngrok tunnel
-//   npm run setup-retell -- --url https://x  explicit public URL
+//   npm run setup-retell -- --url https://usc-dual-hacks-production.up.railway.app
+//   npm run setup-retell                     uses a running ngrok tunnel instead
 //   npm run setup-retell -- --buy 213        ALSO buys a number in that area code ($2/mo)
 import { readFile, writeFile } from 'node:fs/promises';
 import Retell from 'retell-sdk';
@@ -19,7 +18,6 @@ if (!config.retellApiKey) throw new Error('RETELL_API_KEY missing from server/.e
 const retell = new Retell({ apiKey: config.retellApiKey });
 
 const INBOUND_NAME = 'Line Intake';
-const OUTBOUND_NAME = 'Line Outbound';
 const VOICE = process.env.RETELL_VOICE_ID || '11labs-Marissa';
 const MODEL = process.env.RETELL_MODEL || 'claude-5.5-haiku';
 const DISPATCHER = process.env.DISPATCHER_NUMBER || '';
@@ -103,15 +101,6 @@ const inboundId = await upsertAgent({
     "LA Community Line. I'm automated, and I can get you a person. Is anyone hurt or in danger?",
 });
 
-const outboundId = await upsertAgent({
-  name: OUTBOUND_NAME,
-  base,
-  prompt: await file('retell/outbound-prompt.md'),
-  toolList: allTools.filter((t) => t.type !== 'custom'),
-  startSpeaker: 'agent',
-  beginMessage: 'This is an automated alert from the LA Community Line.',
-});
-
 let number = config.fromNumber;
 const buy = arg('--buy');
 if (!number && buy) {
@@ -123,14 +112,14 @@ if (!number && buy) {
 if (number) {
   await retell.phoneNumber.update(number, {
     inbound_agents: [{ agent_id: inboundId, weight: 1, agent_version: 'latest' }],
-    outbound_agents: [{ agent_id: outboundId, weight: 1, agent_version: 'latest' }],
+    outbound_agents: [], // inbound only: the number never places calls
   });
-  console.log(`${number} → inbound ${INBOUND_NAME}, outbound ${OUTBOUND_NAME}`);
+  console.log(`${number} → inbound ${INBOUND_NAME}, outbound disabled`);
 } else {
   console.log('No number yet. Buy one in the dashboard, or re-run with --buy <area code>.');
 }
 
-// Write the ids back into .env so dial.js picks them up.
+// Write the number back into .env.
 const envUrl = new URL('../.env', import.meta.url);
 let env = await readFile(envUrl, 'utf8').catch(() => '');
 const set = (k, v) => {
@@ -138,6 +127,5 @@ const set = (k, v) => {
   env = new RegExp(`^${k}=.*$`, 'm').test(env) ? env.replace(new RegExp(`^${k}=.*$`, 'm'), `${k}=${v}`) : env + `\n${k}=${v}\n`;
 };
 set('RETELL_FROM_NUMBER', number);
-set('RETELL_OUTBOUND_AGENT_ID', outboundId);
 await writeFile(envUrl, env);
 console.log('server/.env updated');
