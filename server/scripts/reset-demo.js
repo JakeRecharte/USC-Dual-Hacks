@@ -67,10 +67,24 @@ if (!statuses.length || !households.length || bad.length || orphans.length || ba
 
 // Non-destructive first (upsert households), destructive last, so a failure leaves data in place.
 check('upsert addresses', await db.from('addresses').upsert(households, { onConflict: 'id' }));
+
+// Households no longer in the seed (P4 replaces it as the map grows) would show on the board as
+// strays. Remove them; their statuses cascade, calls keep the row and lose the link.
+const existing = [];
+for (let from = 0; ; from += 1000) {
+  const { data, error } = await db.from('addresses').select('id').range(from, from + 999);
+  check('list addresses', { error });
+  existing.push(...data.map((r) => r.id));
+  if (data.length < 1000) break;
+}
+const stray = existing.filter((id) => !ids.has(id));
+for (let i = 0; i < stray.length; i += 100) {
+  check('remove stray households', await db.from('addresses').delete().in('id', stray.slice(i, i + 100)));
+}
 check('clear status_log', await db.from('status_log').delete().not('address_id', 'is', null));
 check('insert status_log', await db.from('status_log').insert(statuses));
 if (!process.argv.includes('--keep-calls')) {
   check('clear calls', await db.from('calls').delete().not('call_id', 'is', null));
 }
 
-console.log(`reset: ${households.length} households synced, ${statuses.length} statuses re-based to now, call log ${process.argv.includes('--keep-calls') ? 'kept' : 'cleared'}`);
+console.log(`reset: ${households.length} households synced (${stray.length} stray removed), ${statuses.length} statuses re-based to now, call log ${process.argv.includes('--keep-calls') ? 'kept' : 'cleared'}`);
