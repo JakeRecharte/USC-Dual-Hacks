@@ -1,0 +1,22 @@
+{
+  "name": "server",
+  "version": "1.0.0",
+  "description": "Line telephony server (Retell webhooks + outbound)",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "simulate": "node scripts/simulate.js",
+    "test-outbound": "node scripts/test-outbound.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "dependencies": {
+    "dotenv": "^18.0.8",
+    "fastify": "^5.12.7",
+    "retell-sdk": "^6.2.7"
+  },
+  "private": true
+}
