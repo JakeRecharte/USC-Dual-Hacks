@@ -8,7 +8,7 @@
     "dev": "node --watch src/index.js",
     "simulate": "node scripts/simulate.js",
     "setup-retell": "node scripts/setup-retell.js",
-    "test": "node --test \"test/*.test.js\"",
+    "test": "SUPABASE_URL= SUPABASE_SERVICE_ROLE_KEY= node --test \"test/*.test.js\"",
     "deploy": "cd .. && railway up --ci -p e4a0f795-23e0-45f4-bb91-54dfd4f40a73 -e production -s USC-Dual-Hacks -m \"$(git rev-parse --short HEAD)\"",
     "reset-demo": "node scripts/reset-demo.js"
   },

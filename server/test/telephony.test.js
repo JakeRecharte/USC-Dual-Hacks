@@ -1,4 +1,7 @@
 // npm test. No network. The six scripted cases from team_plan.md, plus the safety rules.
+// Always on the in-memory data: the npm script blanks the Supabase vars, and this guard
+// stops a direct `node --test` from writing test rows into the live calls table.
+if (process.env.SUPABASE_URL) throw new Error('tests must not run against Supabase: use npm test');
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { checkBypass, callerText } from '../src/bypass.js';
