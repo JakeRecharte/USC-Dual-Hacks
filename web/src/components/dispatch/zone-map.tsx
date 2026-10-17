@@ -5,11 +5,12 @@
 // households are the content. A raster basemap cannot be recoloured this way, which is why
 // this is a vector style rather than tiles with a CSS filter over them.
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import * as maplibreNs from 'maplibre-gl';
 import type { Map as MlMap, StyleSpecification } from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { PERIMETER, ZONE_NAMES, type LatLngTuple } from '@/lib/zones';
+import { describeMapError } from '@/lib/webgl';
 import { HOUSE_COLOR, URGENCY_COLOR, reasonOf, urgencyOf, zoneSummaries } from '@/lib/priority';
 import { STATUS_LABEL, STRUCTURE_LABEL } from '@/lib/types';
 import type { AddressState } from '@/lib/types';
@@ -280,26 +281,35 @@ export function ZoneMap({
   dataRef.current = { addresses, now, mode };
   const outlinesRef = useRef<Outlines | null>(null);
 
+  const [mapError, setMapError] = useState<string | null>(null);
+
   useEffect(() => {
     if (!hostRef.current || mapRef.current) return;
 
-    const map = new maplibregl.Map({
-      container: hostRef.current,
-      style: BASE_STYLE,
-      center: [-118.545, 34.055],
-      zoom: 12.8,
-      minZoom: MIN_ZOOM,
-      maxZoom: MAX_ZOOM,
-      // Hard stop: the view cannot leave the incident.
-      maxBounds: lockedBounds(),
-      // No cross-fade between zoom levels: on an operations board a tile that is there
-      // should be drawn, not eased in over 300ms.
-      fadeDuration: 0,
-      // The locked region is a few dozen tiles, so nothing ever needs evicting.
-      maxTileCacheSize: 400,
-      refreshExpiredTiles: false,
-      attributionControl: { compact: true },
-    });
+    // A browser without WebGL2 makes the constructor throw; show why instead of losing the page.
+    let map: MlMap;
+    try {
+      map = new maplibregl.Map({
+        container: hostRef.current,
+        style: BASE_STYLE,
+        center: [-118.545, 34.055],
+        zoom: 12.8,
+        minZoom: MIN_ZOOM,
+        maxZoom: MAX_ZOOM,
+        // Hard stop: the view cannot leave the incident.
+        maxBounds: lockedBounds(),
+        // No cross-fade between zoom levels: on an operations board a tile that is there
+        // should be drawn, not eased in over 300ms.
+        fadeDuration: 0,
+        // The locked region is a few dozen tiles, so nothing ever needs evicting.
+        maxTileCacheSize: 400,
+        refreshExpiredTiles: false,
+        attributionControl: { compact: true },
+      });
+    } catch (e) {
+      setMapError(describeMapError(e));
+      return;
+    }
     mapRef.current = map;
 
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
@@ -457,6 +467,13 @@ export function ZoneMap({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusId]);
 
+  if (mapError) {
+    return (
+      <div role="alert" className="flex h-full w-full items-center justify-center p-6 text-center text-sm leading-relaxed text-muted">
+        {mapError}
+      </div>
+    );
+  }
   return <div ref={hostRef} className="h-full w-full" role="application" aria-label="Palisades evacuation map" />;
 }
 

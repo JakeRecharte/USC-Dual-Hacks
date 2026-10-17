@@ -15,6 +15,7 @@ import * as maplibreNs from 'maplibre-gl';
 import type { Map as MlMap, StyleSpecification } from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { HOUSE_COLOR, STATUS_COLOR } from '@/lib/priority';
+import { describeMapError } from '@/lib/webgl';
 import { NEARBY_RADIUS_M, type LatLng } from '@/lib/geo';
 import type { OfficerPosition } from '@/lib/officer-position';
 import type { AddressState } from '@/lib/types';
@@ -236,21 +237,28 @@ export function OfficerMap({
     if (!hostRef.current || mapRef.current) return;
 
     const start = stateRef.current.position;
-    const map = new maplibregl.Map({
-      container: hostRef.current,
-      style: BASE_STYLE,
-      center: start ? [start.lng, start.lat] : [-118.5232, 34.0401],
-      zoom: FOLLOW_ZOOM,
-      minZoom: MIN_ZOOM,
-      maxZoom: MAX_ZOOM,
-      fadeDuration: 0,
-      // One finger drags the map. Rotating and pitching by accident with a gloved hand is
-      // all cost and no benefit, and a rotated map is a map an officer has to re-read.
-      dragRotate: false,
-      pitchWithRotate: false,
-      touchZoomRotate: true,
-      attributionControl: { compact: true },
-    });
+    // A browser without WebGL2 makes the constructor throw; show why instead of losing the page.
+    let map: MlMap;
+    try {
+      map = new maplibregl.Map({
+        container: hostRef.current,
+        style: BASE_STYLE,
+        center: start ? [start.lng, start.lat] : [-118.5232, 34.0401],
+        zoom: FOLLOW_ZOOM,
+        minZoom: MIN_ZOOM,
+        maxZoom: MAX_ZOOM,
+        fadeDuration: 0,
+        // One finger drags the map. Rotating and pitching by accident with a gloved hand is
+        // all cost and no benefit, and a rotated map is a map an officer has to re-read.
+        dragRotate: false,
+        pitchWithRotate: false,
+        touchZoomRotate: true,
+        attributionControl: { compact: true },
+      });
+    } catch (e) {
+      setMapError(describeMapError(e));
+      return;
+    }
     mapRef.current = map;
 
     map.on('error', (e) => {
