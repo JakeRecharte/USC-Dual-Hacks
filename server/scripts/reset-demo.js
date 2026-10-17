@@ -3,9 +3,11 @@
 //   npm run reset-demo               statuses + call log
 //   npm run reset-demo -- --keep-calls
 //
-// The seed is read from docs/SUPABASE_SETUP.md §3 (P4's), so the board's numbers, the demo
-// script and this reset can't drift apart. The DB stores absolute times, so without this
-// "cleared 40 minutes ago" is two hours old by the afternoon and demo case 1 stops working.
+// The seed is read from docs/seed.sql (P4's, generated from the board's own data), so the
+// board's numbers, the demo script and this reset can't drift apart. It used to be read from
+// §3 of docs/SUPABASE_SETUP.md; the seed moved to its own file once it passed three thousand
+// lines. The DB stores absolute times, so without this "cleared 40 minutes ago" is two hours
+// old by the afternoon and demo case 1 stops working.
 import { readFile } from 'node:fs/promises';
 import { db } from '../src/db.js';
 
@@ -14,9 +16,10 @@ if (!db) {
   process.exit(1);
 }
 
-const doc = await readFile(new URL('../../docs/SUPABASE_SETUP.md', import.meta.url), 'utf8');
-const seed = [...doc.matchAll(/```sql\n([\s\S]*?)```/g)].map((m) => m[1]).find((b) => b.includes('insert into public.status_log'));
-if (!seed) throw new Error('seed block not found in docs/SUPABASE_SETUP.md');
+const seed = await readFile(new URL('../../docs/seed.sql', import.meta.url), 'utf8');
+if (!seed.includes('insert into public.status_log')) {
+  throw new Error('docs/seed.sql has no status rows; regenerate it from the board data');
+}
 
 // Split one SQL tuple body on top-level commas, respecting 'quoted, strings'.
 function fields(tuple) {
@@ -43,8 +46,8 @@ const nul = (v) => (v === 'null' ? null : v);
 const [addrSql, statusSql] = seed.split('insert into public.status_log');
 const statuses = tuples(statusSql).map(([address_id, status, source, note, recorded]) =>
   ({ address_id, status, source, note: nul(note), recorded_at: when(recorded) }));
-// Households come from the seed too: P4 widened it from 30 to 79 at 11:40 and the database
-// still had 30, so statuses for the new ones failed the foreign key.
+// Households come from the seed too: the board has been widened more than once and a
+// database holding the previous set fails the foreign key for every new status.
 const households = tuples(addrSql.split('insert into public.addresses')[1] || '')
   .filter((f) => f.length === 8)
   .map(([id, address, lat, lng, zone_id, resident_name, structure, at]) =>
