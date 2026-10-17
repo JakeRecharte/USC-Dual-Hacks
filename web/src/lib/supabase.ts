@@ -44,7 +44,22 @@ export function browserClient(accessToken: string): SupabaseClient {
 export function serviceClient(): SupabaseClient | null {
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!SUPABASE_URL || !key) return null;
+  // A URL pasted without its scheme is the usual configuration mistake, and createClient
+  // throws on it. Returning null turns that into a readable error instead of a 500.
+  if (!/^https?:\/\//.test(SUPABASE_URL)) return null;
   return createClient(SUPABASE_URL, key, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
+}
+
+/** Why the Supabase configuration is unusable, or null when it is fine. */
+export function configProblem(): string | null {
+  if (!supabaseConfigured) return null;
+  if (!/^https?:\/\//.test(SUPABASE_URL)) {
+    return 'NEXT_PUBLIC_SUPABASE_URL must start with https:// — paste the full Project URL.';
+  }
+  if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    return 'SUPABASE_SERVICE_ROLE_KEY is not set, so officer taps cannot be written.';
+  }
+  return null;
 }

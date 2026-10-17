@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { roleFromRequest } from '@/lib/auth';
 import { applyUpdate, type StatusUpdate } from '@/lib/server-store';
-import { serviceClient, supabaseConfigured } from '@/lib/supabase';
+import { configProblem, serviceClient, supabaseConfigured } from '@/lib/supabase';
 import { writeStatus } from '@/lib/supabase-data';
 import type { Status, Structure } from '@/lib/types';
 
@@ -68,8 +68,8 @@ export async function POST(req: Request) {
     const client = serviceClient();
     if (!client) {
       return NextResponse.json(
-        { error: 'SUPABASE_SERVICE_ROLE_KEY is not set, so writes cannot be made' },
-        { status: 500 },
+        { error: configProblem() ?? 'Supabase is configured but unusable.' },
+        { status: 503 },
       );
     }
     for (const { index, update } of updates) {
