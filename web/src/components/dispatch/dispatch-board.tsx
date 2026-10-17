@@ -13,8 +13,8 @@ import {
   zoneSummaries,
   type Urgency,
 } from '@/lib/priority';
-import { ROUTING_LABEL, ROUTING_RANK } from '@/lib/types';
-import type { AddressState, CallRow } from '@/lib/types';
+import { CALLER_STATE_LABEL, DISTRESS_THRESHOLD, ROUTING_LABEL, ROUTING_RANK } from '@/lib/types';
+import type { AddressState, CallRow, CallerState } from '@/lib/types';
 import { telephonyConfigured, useAddresses, useCalls, useNow } from '@/lib/use-live';
 import { ConnectionDot, ResetButton, SignOutButton, StatusChip, StructureChip } from '@/components/ui';
 import type { MapMode } from './zone-map';
@@ -274,6 +274,65 @@ const ROUTING_TONE: Record<CallRow['routing'], string> = {
   answered_by_agent: 'var(--clear)',
 };
 
+/**
+ * The caller's emotional state, per docs/DATA_CONTRACT.md §3a. Worried is the normal call on
+ * this line, so calm and worried stay recessive and only distressed and above take a status
+ * colour. Always labelled, never colour alone.
+ */
+const CALLER_STATE_TONE: Record<CallerState, string> = {
+  calm: 'var(--muted)',
+  worried: 'var(--muted)',
+  distressed: 'var(--high)',
+  panicked: 'var(--critical)',
+};
+
+function EmotionGauge({ state, score }: { state?: CallerState | null; score?: number }) {
+  const distress = score ?? 0;
+  if (!state && distress === 0) return null;
+  const tone = state ? CALLER_STATE_TONE[state] : 'var(--muted)';
+  // Four segments against the handoff threshold, so "one notch from a human" is visible.
+  const segments = Math.max(DISTRESS_THRESHOLD + 1, distress);
+
+  return (
+    <div className="mt-1.5 flex items-center gap-2">
+      {state && (
+        <span
+          className="inline-flex shrink-0 items-center gap-1 text-xs font-semibold"
+          style={{ color: tone }}
+        >
+          {(state === 'panicked' || state === 'distressed') && <span aria-hidden>▲</span>}
+          {CALLER_STATE_LABEL[state]}
+        </span>
+      )}
+      {distress > 0 && (
+        <span
+          className="flex items-center gap-0.5"
+          title={`Distress score ${distress} of ${DISTRESS_THRESHOLD} needed for a handoff`}
+        >
+          <span className="sr-only">
+            Distress score {distress}, handoff at {DISTRESS_THRESHOLD}
+          </span>
+          {Array.from({ length: segments }, (_, i) => (
+            <span
+              key={i}
+              aria-hidden
+              className="h-1.5 w-2.5 rounded-sm"
+              style={{
+                background:
+                  i < distress
+                    ? distress >= DISTRESS_THRESHOLD
+                      ? 'var(--critical)'
+                      : 'var(--high)'
+                    : 'var(--line)',
+              }}
+            />
+          ))}
+        </span>
+      )}
+    </div>
+  );
+}
+
 function CallQueue({
   calls,
   now,
@@ -325,6 +384,7 @@ function CallQueue({
                   {c.mode === 'routine' && ' · routine check'}
                 </p>
                 <p className="mt-1 text-xs leading-relaxed text-muted">{c.reason}</p>
+                <EmotionGauge state={c.caller_state} score={c.distress_score} />
               </li>
             ))}
           </ul>
@@ -409,6 +469,7 @@ const DEMO_CALLS: { label: string; row: Omit<CallRow, 'id' | 'call_id' | 'create
       routing: 'answered_by_agent',
       severity: 1,
       reason: 'cleared 40 min ago — answered with the time',
+      caller_state: 'worried',
     },
   },
   {
@@ -432,8 +493,10 @@ const DEMO_CALLS: { label: string; row: Omit<CallRow, 'id' | 'call_id' | 'create
       address_id: 'a3',
       routing: 'human_now',
       severity: 5,
-      reason: 'caller is with them now — transferred to a call-taker',
+      reason: 'caller distress: said "please hurry"; agent asked to repeat 2x',
       bypass: true,
+      caller_state: 'panicked',
+      distress_score: 4,
     },
   },
   {

@@ -1,8 +1,8 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ROUTING_RANK } from './types';
-import type { AddressState, CallRow, Routing } from './types';
+import { CALLER_STATE_RANK, ROUTING_RANK } from './types';
+import type { AddressState, CallRow, CallerState, Routing } from './types';
 
 /** A ticking clock, so "40 min ago" ages on screen without a refresh. */
 export function useNow(intervalMs = 15_000): number {
@@ -105,8 +105,13 @@ export function useCalls() {
       upsert(normalise(row));
     });
 
+    // Two shapes, both live: `reason` when the agent asks for a human itself, `kind` plus a
+    // `reasons` array when the server spots it in the transcript. Handle either.
     source.addEventListener('bypass', (e) => {
       const d = JSON.parse((e as MessageEvent).data) as Record<string, unknown>;
+      const reasons = Array.isArray(d.reasons) ? (d.reasons as string[]) : [];
+      const detail = reasons.length > 0 ? reasons.join('; ') : String(d.reason ?? 'unspecified');
+      const kind = d.kind === 'distress' ? 'caller distress' : 'life-safety language';
       upsert({
         id: String(d.call_id ?? ''),
         call_id: String(d.call_id ?? ''),
@@ -116,11 +121,30 @@ export function useCalls() {
         address_id: null,
         routing: 'human_now',
         severity: 5,
-        reason: `life-safety language: ${String(d.reason ?? 'unspecified')}`,
+        reason: `${kind}: ${detail}`,
         created_at: new Date().toISOString(),
         from_number: (d.from_number as string) ?? null,
         bypass: true,
       });
+    });
+
+    // The emotion gauge. Arrives on its own, often before the call is routed, so it only
+    // ever patches an existing row rather than creating a bare one.
+    source.addEventListener('emotion', (e) => {
+      const d = JSON.parse((e as MessageEvent).data) as Record<string, unknown>;
+      const id = String(d.call_id ?? '');
+      if (!id) return;
+      setCalls((prev) =>
+        prev.map((c) =>
+          (c.call_id || c.id) === id
+            ? {
+                ...c,
+                caller_state: worseState(c.caller_state, d.caller_state as CallerState | null),
+                distress_score: Math.max(c.distress_score ?? 0, Number(d.distress_score) || 0),
+              }
+            : c,
+        ),
+      );
     });
 
     source.onopen = () => setConnection('live');
@@ -153,6 +177,8 @@ function useUpsertCall(setCalls: React.Dispatch<React.SetStateAction<CallRow[]>>
         subject_name: row.subject_name || existing.subject_name,
         bypass: existing.bypass || row.bypass,
         severity: Math.max(existing.severity, row.severity),
+        caller_state: worseState(existing.caller_state, row.caller_state),
+        distress_score: Math.max(existing.distress_score ?? 0, row.distress_score ?? 0),
         routing: moreUrgent(existing.routing, row.routing),
         reason: row.reason || existing.reason,
         created_at: existing.created_at,
@@ -163,6 +189,16 @@ function useUpsertCall(setCalls: React.Dispatch<React.SetStateAction<CallRow[]>>
 }
 
 const moreUrgent = (a: Routing, b: Routing): Routing => (ROUTING_RANK[b] < ROUTING_RANK[a] ? b : a);
+
+/** Caller state only ever moves up, per the contract. */
+function worseState(
+  a: CallerState | null | undefined,
+  b: CallerState | null | undefined,
+): CallerState | null {
+  if (!a) return b ?? null;
+  if (!b) return a;
+  return CALLER_STATE_RANK[b] > CALLER_STATE_RANK[a] ? b : a;
+}
 
 const normalise = (row: CallRow): CallRow => ({
   ...row,

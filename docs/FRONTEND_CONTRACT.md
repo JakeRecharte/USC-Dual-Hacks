@@ -103,8 +103,22 @@ is the shared source of truth, so only do it if that isn't going to land in time
 |---|---|---|
 | `web/src/lib/addresses.ts` | 30 fake addresses across 4 zones + 2 outside | in place, swap for Supabase |
 | `GET /api/events` (ours) | status changes, officer → dispatcher | working |
-| `GET {telephony}/events` | live call queue, `lookup` / `call_logged` / `bypass` | working, needs the server up |
+| `GET {telephony}/events` | live call queue: `lookup`, `call_logged`, `bypass`, `emotion` | working, needs the server up |
 | `POST {BACKEND_URL}/update_status` | mirroring taps into Supabase | waiting on P2 |
 
 The first seven fake addresses are copied from `server/src/backend.js` — same resident names,
 statuses and ages — so a real phone call and the board agree on screen.
+
+## 5. Consuming P1's emotion work (done)
+
+`caller_state` and the `emotion` event from §3a are both on the board now: a labelled state
+on each queue row and a distress meter scaled against the handoff threshold of 3.
+
+Two notes for P1, neither blocking:
+
+- **`bypass` ships two shapes.** `/fn/request_human` emits `{ reason }`; the transcript path
+  emits `{ kind, reasons }`. The board handles both, but they are worth collapsing into one
+  shape before anyone else consumes the feed.
+- **`emotion` can arrive with `caller_state: null`** when the words-based score moves before
+  the agent has reported a state. The board treats that as "score only, state unchanged" and
+  never downgrades a state, matching "only ever moves up".

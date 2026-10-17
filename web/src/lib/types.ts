@@ -20,6 +20,12 @@ export type Source = 'officer' | 'resident_reply' | 'call';
  */
 export type Structure = 'intact' | 'damaged' | 'destroyed' | 'unassessed';
 
+/**
+ * The agent's read of the caller, per docs/DATA_CONTRACT.md §3a. Only ever moves up: a
+ * caller who was panicked stays panicked for the rest of the call.
+ */
+export type CallerState = 'calm' | 'worried' | 'distressed' | 'panicked';
+
 /** calls.routing. */
 export type Routing =
   | 'human_now'
@@ -63,6 +69,9 @@ export interface CallRow {
   from_number?: string | null;
   /** Set when the agent heard life-safety language mid-sentence and bypassed the script. */
   bypass?: boolean;
+  caller_state?: CallerState | null;
+  /** Keyword score of the caller's words. 3 or more is what trips a handoff. */
+  distress_score?: number;
 }
 
 export const STATUS_LABEL: Record<Status, string> = {
@@ -95,3 +104,24 @@ export const ROUTING_RANK: Record<Routing, number> = {
   scheduled_followup: 2,
   answered_by_agent: 3,
 };
+
+export const CALLER_STATE_LABEL: Record<CallerState, string> = {
+  calm: 'Calm',
+  worried: 'Worried',
+  distressed: 'Distressed',
+  panicked: 'Panicked',
+};
+
+/**
+ * Worried is the normal call on this line — "I can't reach my mom" is why people ring — so
+ * only distressed and above get a colour that pulls the eye.
+ */
+export const CALLER_STATE_RANK: Record<CallerState, number> = {
+  calm: 0,
+  worried: 1,
+  distressed: 2,
+  panicked: 3,
+};
+
+/** docs/DATA_CONTRACT.md §3a: the score at which the server hands the call to a human. */
+export const DISTRESS_THRESHOLD = 3;

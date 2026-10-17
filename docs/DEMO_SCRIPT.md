@@ -96,6 +96,23 @@ The agent does **not** read out a refusal. It routes.
 > doesn't try to resolve that — it moves them to the front and hands them to a human. The
 > agent can move a call **up** the queue. It can never close one."
 
+## Optional beat — the caller who can't be helped by a machine (+20 s)
+
+Added after P1's distress work landed. Worth including if you have the time, because it is
+the answer to "why not just a chatbot."
+
+**P1 calls and panics** — "oh my god, please hurry."
+
+**On the board:** the row jumps to **Human now** with ⚡, the caller reads **▲ Panicked**, and
+the distress meter fills past the handoff mark. The agent stops talking mid-sentence.
+
+> "The agent scores the caller's own words, live. Panic, pleading, or the agent having to ask
+> twice to be understood — any of those and it stops talking and hands over. It never tells
+> the caller it thinks they're panicking. A worried caller is the normal call on this line, so
+> worry alone changes nothing."
+
+The gauge is on every row: grey for calm and worried, orange at distressed, red at panicked.
+
 ## Beat 5 — the same system on a normal day (2:15–2:40)
 
 **P1 makes the routine call:** hasn't heard from grandma in five days, she's 81, lives alone,
