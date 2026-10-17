@@ -18,29 +18,47 @@ printed on the sign-in screen outside production.
 | `/officer` | officers | Assigned addresses by zone, three status buttons per door |
 | `/dispatch` | dispatchers | Priority heatmap, live call queue, door-knock list |
 
-## How the two portals stay in step
+## Two modes, and why
 
-During the demo the officer is on a phone and the dispatcher is on a laptop — two different
-browsers. A tap has to travel through the server to reach the board:
+The officer is on a phone and the dispatcher is on a laptop, so a tap has to travel through
+something shared to reach the board. What that something is depends on configuration, and the
+dispatch header always says which mode is live.
+
+**Database mode** — the Supabase variables are set. Required on Vercel.
+
+```
+officer phone ──POST /api/status──► route handler (service-role key) ──► Postgres
+                                                                          │
+dispatch board ◄──── Supabase Realtime (WebSocket, direct) ───────────────┘
+```
+
+Nothing live passes through our own server, which is the point: on Vercel each request may
+hit a different serverless instance, so no in-process state can be shared and a long-lived
+SSE stream gets cut.
+
+**Memory mode** — nothing configured. The in-process store plus our own SSE feed.
 
 ```
 officer phone ──POST /api/status──► src/lib/server-store.ts ──SSE /api/events──► dispatch board
-                                            │
-                                            └──► POST {BACKEND_URL}/update_status  (when set)
 ```
 
-`server-store.ts` holds the newest status per address in memory and is the only thing that
-writes. The dispatcher board also opens a second `EventSource` straight at the telephony
-server's `/events` for the live call queue (`docs/DATA_CONTRACT.md` §5).
+One long-running server only, so this is for local demos — but it needs no database and is
+the safe fallback. `npx next start -H 0.0.0.0 -p 3100` and the officer's phone can reach the
+laptop over the LAN.
 
-## Swapping the fake data for Supabase
+Either way the dispatcher opens a second `EventSource` at the telephony server's `/events`
+for the live call queue (`docs/DATA_CONTRACT.md` §5), which is unrelated to both.
 
-Two places, nothing else:
+Setting it all up: **`docs/SUPABASE_SETUP.md`** has the schema, the RLS policies, the seed
+SQL and the Vercel configuration.
 
-- `src/lib/addresses.ts` — `seedAddresses()` returns the 30 fake rows. Replace with a read of
-  `addresses` joined to the newest `status_log` row per address.
-- `src/lib/server-store.ts` — `applyUpdate()` already forwards to `update_status` when
-  `BACKEND_URL` is set. Point reads at Supabase Realtime and `/api/events` can go away.
+## Reads are behind the shift code
+
+The board shows resident names and whether each household evacuated. The Supabase anon key
+ships in the browser bundle, so RLS grants `anon` nothing: `/api/db-token` mints a
+short-lived `authenticated` JWT only after the passcode check, and the policies key off that.
+No shift code, no token, no data. If `SUPABASE_JWT_SECRET` is unset the app still runs on the
+anon key but shows an amber warning, because that state should not ship.
 
 ## Commands
 

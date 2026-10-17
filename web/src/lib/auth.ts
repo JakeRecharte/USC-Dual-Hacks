@@ -68,3 +68,14 @@ export async function roleFromCookie(value: string | undefined): Promise<Role | 
   if (!isRole(role)) return null;
   return sameString(value.slice(dot + 1), await hmac(role)) ? role : null;
 }
+
+/** The signed-in role for a route handler, or null. */
+export async function roleFromRequest(req: Request): Promise<Role | null> {
+  const raw = req.headers
+    .get('cookie')
+    ?.split(';')
+    .map((c) => c.trim())
+    .find((c) => c.startsWith(`${ROLE_COOKIE}=`))
+    ?.slice(ROLE_COOKIE.length + 1);
+  return roleFromCookie(raw);
+}

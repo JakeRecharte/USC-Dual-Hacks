@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
-import { ROLE_COOKIE, roleFromCookie } from '@/lib/auth';
+import { roleFromRequest } from '@/lib/auth';
 import { applyUpdate, type StatusUpdate } from '@/lib/server-store';
+import { serviceClient, supabaseConfigured } from '@/lib/supabase';
+import { writeStatus } from '@/lib/supabase-data';
 import type { Status, Structure } from '@/lib/types';
 
 const STATUSES: Status[] = ['cleared', 'refused', 'no_answer', 'self_out', 'in_transit', 'unknown'];
@@ -12,14 +14,7 @@ const STRUCTURES: Structure[] = ['intact', 'damaged', 'destroyed', 'unassessed']
  * `recorded_at`: the time the officer tapped, not the time it reached us.
  */
 export async function POST(req: Request) {
-  const role = await roleFromCookie(
-    req.headers
-      .get('cookie')
-      ?.split(';')
-      .map((c) => c.trim())
-      .find((c) => c.startsWith(`${ROLE_COOKIE}=`))
-      ?.slice(ROLE_COOKIE.length + 1),
-  );
+  const role = await roleFromRequest(req);
   if (role !== 'officer') return NextResponse.json({ error: 'officers only' }, { status: 403 });
 
   const body = await req.json().catch(() => null);
@@ -28,8 +23,9 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'send 1 to 200 updates' }, { status: 400 });
   }
 
-  const applied = [];
+  const applied: unknown[] = [];
   const rejected: { index: number; reason: string }[] = [];
+  const updates: { index: number; update: StatusUpdate }[] = [];
 
   for (const [index, raw] of items.entries()) {
     const item = (raw ?? {}) as Record<string, unknown>;
@@ -62,10 +58,33 @@ export async function POST(req: Request) {
       update.recorded_at = item.recorded_at;
     }
 
-    const row = applyUpdate({ ...update, source: 'officer' });
+    updates.push({ index, update: { ...update, source: 'officer' as const } });
+  }
+
+  // Supabase mode: the database is the shared source of truth, so Vercel's serverless
+  // instances do not need to agree about anything. The officer page repaints optimistically
+  // and the dispatcher hears about it over Realtime, straight from Postgres.
+  if (supabaseConfigured) {
+    const client = serviceClient();
+    if (!client) {
+      return NextResponse.json(
+        { error: 'SUPABASE_SERVICE_ROLE_KEY is not set, so writes cannot be made' },
+        { status: 500 },
+      );
+    }
+    for (const { index, update } of updates) {
+      const result = await writeStatus(client, update);
+      if (result.ok) applied.push(update.address_id);
+      else rejected.push({ index, reason: result.reason });
+    }
+    return NextResponse.json({ applied, rejected, mode: 'supabase', now: Date.now() });
+  }
+
+  for (const { index, update } of updates) {
+    const row = applyUpdate(update);
     if (row) applied.push(row);
     else rejected.push({ index, reason: 'address not on record' });
   }
 
-  return NextResponse.json({ applied, rejected, now: Date.now() });
+  return NextResponse.json({ applied, rejected, mode: 'memory', now: Date.now() });
 }
