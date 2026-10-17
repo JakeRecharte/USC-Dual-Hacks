@@ -97,7 +97,7 @@ const inboundId = await upsertAgent({
   toolList: allTools,
   startSpeaker: 'agent',
   beginMessage:
-    "This is the Harbor Area Community Line. I'm an automated assistant and I can put you through to a person. First — is anyone hurt or in immediate danger?",
+    "This is the LA Community Line. I'm an automated assistant and I can put you through to a person. First — is anyone hurt or in immediate danger?",
 });
 
 const outboundId = await upsertAgent({
@@ -106,7 +106,7 @@ const outboundId = await upsertAgent({
   prompt: await file('retell/outbound-prompt.md'),
   toolList: allTools.filter((t) => t.type !== 'custom'),
   startSpeaker: 'agent',
-  beginMessage: 'This is an automated alert from the Harbor Area Community Line.',
+  beginMessage: 'This is an automated alert from the LA Community Line.',
 });
 
 let number = config.fromNumber;
