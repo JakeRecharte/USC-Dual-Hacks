@@ -23,6 +23,28 @@ export const URGENCY_COLOR: Record<Urgency, string> = {
 };
 
 /**
+ * Status, not urgency, on the officer's own map.
+ *
+ * The dispatcher's board colours by urgency, which is the right question for allocating
+ * crews. An officer standing on the street is asking a narrower one — what has this house
+ * already told us — so these map the six contracted statuses onto the SAME four validated
+ * steps above rather than inventing hues. No new colours means the contrast and CVD figures
+ * in URGENCY_COLOR still hold.
+ *
+ * `unknown` and `no_answer` share the slate on purpose: both mean "nobody has heard from
+ * this house", and the officer map tells them apart by fill opacity and by the status line
+ * in the sheet, never by colour alone.
+ */
+export const STATUS_COLOR: Record<Status, string> = {
+  cleared: URGENCY_COLOR.clear,
+  self_out: URGENCY_COLOR.clear,
+  in_transit: URGENCY_COLOR.high,
+  refused: URGENCY_COLOR.critical,
+  no_answer: URGENCY_COLOR.watch,
+  unknown: URGENCY_COLOR.watch,
+};
+
+/**
  * Door-knock density: a sequential single-hue ember ramp, light to dark, the same structure
  * as the reference's capacity ramp. Not green-to-red — that is the worst case for red-green
  * colourblindness, because the safe end and the dangerous end become the same colour. Here
