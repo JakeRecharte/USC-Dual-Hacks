@@ -9,6 +9,7 @@ import {
   isStale,
   urgencyOf,
   zoneSummaries,
+  zoneUrgency,
 } from '../src/lib/priority.ts';
 import type { AddressState, Status, Structure } from '../src/lib/types.ts';
 
@@ -90,18 +91,28 @@ describe('door-knock list', () => {
 });
 
 describe('zone rollup', () => {
-  it('keeps a zone critical while one address in it has refused', () => {
+  it('counts what is unresolved without letting one refusal redden the zone', () => {
     const zone = zoneSummaries(
       [
-        address({ id: '1', zone_id: 'PAC-2', status: 'cleared', recorded_at: minutesAgo(5) }),
-        address({ id: '2', zone_id: 'PAC-2', status: 'cleared', recorded_at: minutesAgo(5) }),
-        address({ id: '3', zone_id: 'PAC-2', status: 'refused', recorded_at: minutesAgo(5) }),
+        address({ id: '1', zone_id: 'PAL-05', status: 'cleared', recorded_at: minutesAgo(5) }),
+        address({ id: '2', zone_id: 'PAL-05', status: 'cleared', recorded_at: minutesAgo(5) }),
+        address({ id: '3', zone_id: 'PAL-05', status: 'refused', recorded_at: minutesAgo(5) }),
       ],
       NOW,
     )[0];
-    assert.equal(zone.urgency, 'critical');
     assert.equal(zone.unresolved, 1);
     assert.equal(zone.total, 3);
+    // One in three outstanding is a watch, not an emergency. At a few hundred households a
+    // zone always contains a refusal, so worst-case rollup would paint every zone red.
+    assert.equal(zone.urgency, 'watch');
+  });
+
+  it('bands a zone by the share of it still outstanding', () => {
+    assert.equal(zoneUrgency(0.85), 'critical');
+    assert.equal(zoneUrgency(0.6), 'critical');
+    assert.equal(zoneUrgency(0.4), 'high');
+    assert.equal(zoneUrgency(0.2), 'watch');
+    assert.equal(zoneUrgency(0.05), 'clear');
   });
 });
 
@@ -127,6 +138,10 @@ describe('seed data', () => {
     for (const zone of zoneSummaries(inside, NOW)) {
       assert.ok(zone.unresolved > 0, `${zone.zone_id} has no unresolved addresses`);
     }
+  });
+
+  it('places every household on a distinct address', () => {
+    assert.equal(new Set(seeded.map((a) => a.address)).size, seeded.length);
   });
 
   it('ages relative to the time it is read, so the demo holds all day', () => {

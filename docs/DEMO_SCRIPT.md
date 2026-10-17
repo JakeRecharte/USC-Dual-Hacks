@@ -19,8 +19,8 @@ Two screens: a **laptop** on `/dispatch` (shared/projected) and a **phone** on `
    call feed is not live, see the fallback at the bottom.
 6. Map on **Density**. Have the phone already scrolled to **640 Toyopa Dr**.
 
-A clean reset shows **40 unresolved of 77**, **4 refused**, **15 never contacted**,
-**7 stale clears**, and the zone strip led by Marquez Knolls `PAL-02` at `9/9`. If those
+A clean reset shows **1,108 unresolved of 1,998**, **83 refused**, **414 never contacted**,
+**202 stale clears**, and the zone strip led by Rustic Canyon `PAL-07` at `183/229`. If those
 don't match, you didn't reset.
 
 ---
@@ -29,15 +29,18 @@ don't match, you didn't reset.
 
 **Show:** the dispatch map on Density.
 
-> "This is Pacific Palisades during a wildfire — seventy-seven households, from the coast at
-> Castellammare up into the Highlands. Every dot is a home. The heat is not population — it's
-> **where we still don't know if anyone is inside**. Dark means officers are needed. It fades
-> as doors get answered."
+> "This is Pacific Palisades during a wildfire — two thousand households, from the coast at
+> Castellammare up into the Highlands. Every one of those shapes is a real house, traced from
+> the map. The heat is not population — it's **where we still don't know if anyone is
+> inside**. Dark means officers are needed. It fades as doors get answered."
 
-Click **Zones**. Zone circles and the `9/9` labels come up.
+Zoom in once: the blobs resolve into individual houses, each one coloured by its status, with
+the grey ones around them the buildings nobody has a record for.
 
-> "Marquez Knolls — nine homes, not one of them answered yet. No crew has reached that
-> street. That's where the next one goes."
+Click **Zones**. Zone circles and the `183/229` labels come up.
+
+> "Rustic Canyon — a hundred and eighty-three of two hundred and twenty-nine still
+> unanswered. Deep canyon, bad signal, nobody has worked it. That's where the next crew goes."
 
 Click back to **Density**.
 
@@ -53,9 +56,9 @@ Click back to **Density**.
 Open **Structure and notes**, type `two adults staying, won't leave the dogs`, then tap
 **Refused**.
 
-**Watch the laptop.** Inside a second: the dot turns deep red, the heat deepens over
-Huntington, **Refused** ticks `4 → 5`, **Never contacted** ticks `15 → 14`, and the address
-jumps to the top of the door-knock list with the note under it.
+**Watch the laptop.** Inside a second: that house turns deep red, the heat deepens over
+Huntington, **Refused** ticks `83 → 84`, **Never contacted** ticks `414 → 413`, and the
+address jumps to the top of the door-knock list with the note under it.
 
 > "No refresh, no sync button. Dispatch saw that before the officer put the phone away."
 

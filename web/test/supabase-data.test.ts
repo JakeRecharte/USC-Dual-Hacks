@@ -2,7 +2,7 @@
 // status is picked wrongly, or a household is placed on the wrong side of the fire line.
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { PERIMETER } from '../src/lib/addresses.ts';
+import { PERIMETER } from '../src/lib/zones.ts';
 import { pointInPolygon } from '../src/lib/geo.ts';
 import { joinRows } from '../src/lib/supabase-data.ts';
 

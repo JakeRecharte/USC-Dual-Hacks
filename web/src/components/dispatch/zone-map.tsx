@@ -9,7 +9,7 @@ import { useEffect, useRef } from 'react';
 import * as maplibreNs from 'maplibre-gl';
 import type { Map as MlMap, StyleSpecification } from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
-import { PERIMETER, ZONE_NAMES, type LatLngTuple } from '@/lib/addresses';
+import { PERIMETER, ZONE_NAMES, type LatLngTuple } from '@/lib/zones';
 import { HEAT_STOPS, URGENCY_COLOR, URGENCY_WEIGHT, reasonOf, urgencyOf, zoneSummaries } from '@/lib/priority';
 import { STATUS_LABEL, STRUCTURE_LABEL } from '@/lib/types';
 import type { AddressState } from '@/lib/types';
@@ -188,6 +188,48 @@ const BASE_STYLE: StyleSpecification = {
   ],
 };
 
+interface BuildingFile {
+  /** Flat [lng, lat, lng, lat, …] rings, one per building. */
+  rings: number[][];
+  /** [lat, lng] centroid per building, same order and rounding as the household sites. */
+  cent: [number, number][];
+  zone: number[];
+  zones: string[];
+}
+
+/** Key a household to its outline. Both sides round to 5dp, so this matches exactly. */
+const siteKey = (lat: number, lng: number) => `${lat.toFixed(5)},${lng.toFixed(5)}`;
+
+interface Outlines {
+  /** Footprint ring per household centroid. */
+  bySite: Map<string, [number, number][]>;
+  /** Every dwelling in the perimeter, for the context layer. */
+  all: [number, number][][];
+}
+
+async function loadOutlines(signal: AbortSignal): Promise<Outlines | null> {
+  try {
+    const res = await fetch('/buildings.json', { signal, cache: 'force-cache' });
+    if (!res.ok) return null;
+    const file = (await res.json()) as BuildingFile;
+    const bySite = new Map<string, [number, number][]>();
+    const all: [number, number][][] = [];
+    file.rings.forEach((flat, i) => {
+      const ring: [number, number][] = [];
+      for (let j = 0; j < flat.length; j += 2) ring.push([flat[j], flat[j + 1]]);
+      if (ring.length < 3) return;
+      ring.push(ring[0]);
+      all.push(ring);
+      const c = file.cent[i];
+      if (c) bySite.set(siteKey(c[0], c[1]), ring);
+    });
+    return { bySite, all };
+  } catch {
+    // The map still works without outlines: households fall back to points.
+    return null;
+  }
+}
+
 /** GeoJSON wants [lng, lat]; everything else in this app is [lat, lng]. */
 const toLngLat = ([lat, lng]: LatLngTuple): [number, number] => [lng, lat];
 
@@ -236,6 +278,7 @@ export function ZoneMap({
   // Latest data, so the load handler can paint whatever has arrived by then.
   const dataRef = useRef({ addresses, now, mode });
   dataRef.current = { addresses, now, mode };
+  const outlinesRef = useRef<Outlines | null>(null);
 
   useEffect(() => {
     if (!hostRef.current || mapRef.current) return;
@@ -265,6 +308,25 @@ export function ZoneMap({
     const warm = new AbortController();
     void warmTiles(lockedBounds(), warm.signal);
 
+    // Real OpenStreetMap dwelling outlines. The free vector basemap drops most small
+    // buildings at z14, which is why the neighbourhood looks empty without this.
+    void loadOutlines(warm.signal).then((outlines) => {
+      if (!outlines || warm.signal.aborted) return;
+      outlinesRef.current = outlines;
+      const map = mapRef.current;
+      if (!map || !readyRef.current) return;
+      const context = map.getSource('context-buildings') as maplibregl.GeoJSONSource | undefined;
+      context?.setData({
+        type: 'FeatureCollection',
+        features: outlines.all.map((ring) => ({
+          type: 'Feature',
+          properties: {},
+          geometry: { type: 'Polygon', coordinates: [ring] },
+        })),
+      });
+      paint(map, dataRef.current.addresses, dataRef.current.now, dataRef.current.mode, outlines);
+    });
+
     map.on('load', () => {
       map.addSource('perimeter', {
         type: 'geojson',
@@ -275,7 +337,11 @@ export function ZoneMap({
         },
       });
       map.addSource('zones', { type: 'geojson', data: emptyCollection() });
+      map.addSource('context-buildings', { type: 'geojson', data: emptyCollection() });
       map.addSource('households', { type: 'geojson', data: emptyCollection() });
+      // Points drive the density layer and stand in for the outlines when zoomed out far
+      // enough that a footprint is smaller than a pixel.
+      map.addSource('household-points', { type: 'geojson', data: emptyCollection() });
 
       map.addLayer({
         id: 'perimeter-fill', type: 'fill', source: 'perimeter',
@@ -310,7 +376,7 @@ export function ZoneMap({
       // Density of households still needing a knock. Weight comes from urgency, so an
       // evacuated block cools off as officers work through it.
       map.addLayer({
-        id: 'heat', type: 'heatmap', source: 'households',
+        id: 'heat', type: 'heatmap', source: 'household-points',
         paint: {
           'heatmap-weight': ['get', 'weight'],
           'heatmap-intensity': ['interpolate', ['linear'], ['zoom'], 11, 0.9, 15, 1.5],
@@ -324,34 +390,58 @@ export function ZoneMap({
         },
       }, LABELS);
 
+      // Every dwelling the perimeter contains, including the ones with no record. Grey, the
+      // way the reference greys parcels outside the current filter: present, not tracked.
       map.addLayer({
-        id: 'households', type: 'circle', source: 'households',
+        id: 'context-buildings', type: 'fill', source: 'context-buildings',
+        minzoom: 13.5,
         paint: {
-          'circle-radius': ['interpolate', ['linear'], ['zoom'], 11, 2.6, 13, 4.2, 16, 8],
+          'fill-color': CONTEXT,
+          'fill-opacity': ['interpolate', ['linear'], ['zoom'], 13.5, 0, 15, 0.28],
+          'fill-outline-color': '#b9c2cb',
+        },
+      }, LABELS);
+
+      // The tracked households, drawn as the actual shape of the house.
+      map.addLayer({
+        id: 'household-fill', type: 'fill', source: 'households',
+        paint: { 'fill-color': ['get', 'color'], 'fill-opacity': ['get', 'fillOpacity'] },
+      }, LABELS);
+      map.addLayer({
+        id: 'household-line', type: 'line', source: 'households',
+        minzoom: 14,
+        paint: { 'line-color': ['get', 'color'], 'line-width': 1, 'line-opacity': 0.9 },
+      }, LABELS);
+
+      // Below the zoom where a footprint covers more than a pixel or two, dots read better.
+      map.addLayer({
+        id: 'household-points', type: 'circle', source: 'household-points',
+        maxzoom: 15,
+        paint: {
+          'circle-radius': ['interpolate', ['linear'], ['zoom'], 12, 1.6, 14, 3, 15, 4.5],
           'circle-color': ['get', 'color'],
-          'circle-opacity': ['get', 'dotOpacity'],
-          'circle-stroke-width': 1,
-          'circle-stroke-color': PAPER,
+          'circle-opacity': ['interpolate', ['linear'], ['zoom'], 14, ['get', 'dotOpacity'], 15, 0],
+          'circle-stroke-width': 0,
         },
       });
 
-      map.on('click', 'households', (e) => {
+      map.on('click', 'household-fill', (e) => {
         const f = e.features?.[0];
         if (!f) return;
         const id = String(f.properties?.id ?? '');
         selectRef.current(id);
         new maplibregl.Popup({ offset: 12, closeButton: true })
-          .setLngLat((f.geometry as GeoJSON.Point).coordinates as [number, number])
+          .setLngLat(e.lngLat)
           .setHTML(String(f.properties?.popup ?? ''))
           .addTo(map);
       });
-      map.on('mouseenter', 'households', () => { map.getCanvas().style.cursor = 'pointer'; });
-      map.on('mouseleave', 'households', () => { map.getCanvas().style.cursor = ''; });
+      map.on('mouseenter', 'household-fill', () => { map.getCanvas().style.cursor = 'pointer'; });
+      map.on('mouseleave', 'household-fill', () => { map.getCanvas().style.cursor = ''; });
 
       map.fitBounds(boundsOf(PERIMETER), { padding: 28, animate: false });
 
       readyRef.current = true;
-      paint(map, dataRef.current.addresses, dataRef.current.now, dataRef.current.mode);
+      paint(map, dataRef.current.addresses, dataRef.current.now, dataRef.current.mode, outlinesRef.current);
     });
 
     return () => {
@@ -366,7 +456,7 @@ export function ZoneMap({
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !readyRef.current) return;
-    paint(map, addresses, now, mode);
+    paint(map, addresses, now, mode, outlinesRef.current);
   }, [addresses, now, mode]);
 
   // Clicking a row in the lists flies to that household.
@@ -398,16 +488,44 @@ function boundsOf(ring: LatLngTuple[]): [[number, number], [number, number]] {
   ];
 }
 
-function paint(map: MlMap, addresses: AddressState[], now: number, mode: MapMode): void {
+function paint(
+  map: MlMap,
+  addresses: AddressState[],
+  now: number,
+  mode: MapMode,
+  outlines: Outlines | null,
+): void {
   if (addresses.length === 0) return;
 
   const households = map.getSource('households') as maplibregl.GeoJSONSource | undefined;
+  const points = map.getSource('household-points') as maplibregl.GeoJSONSource | undefined;
   const zones = map.getSource('zones') as maplibregl.GeoJSONSource | undefined;
-  if (!households || !zones) return;
+  if (!households || !points || !zones) return;
 
   const heatMode = mode === 'heat';
 
+  // One feature per household, carrying the real outline of its building. A household whose
+  // outline is missing falls back to a small square so it is never invisible.
   households.setData({
+    type: 'FeatureCollection',
+    features: addresses.map((a) => {
+      const urgency = urgencyOf(a, now);
+      const ring = outlines?.bySite.get(siteKey(a.lat, a.lng)) ?? squareAround(a.lat, a.lng);
+      return {
+        type: 'Feature',
+        geometry: { type: 'Polygon', coordinates: [ring] },
+        properties: {
+          id: a.id,
+          color: URGENCY_COLOR[urgency],
+          // Under the density layer the outlines recede so the blobs read.
+          fillOpacity: heatMode ? 0.45 : 0.85,
+          popup: popupHtml(a, now),
+        },
+      } satisfies GeoJSON.Feature;
+    }),
+  });
+
+  points.setData({
     type: 'FeatureCollection',
     features: addresses.map((a) => {
       const urgency = urgencyOf(a, now);
@@ -415,12 +533,9 @@ function paint(map: MlMap, addresses: AddressState[], now: number, mode: MapMode
         type: 'Feature',
         geometry: { type: 'Point', coordinates: [a.lng, a.lat] },
         properties: {
-          id: a.id,
           color: URGENCY_COLOR[urgency],
           weight: URGENCY_WEIGHT[urgency],
-          // Under the heat blobs the dots stay clickable but recede.
-          dotOpacity: heatMode ? 0.55 : 0.95,
-          popup: popupHtml(a, now),
+          dotOpacity: heatMode ? 0.5 : 0.9,
         },
       } satisfies GeoJSON.Feature;
     }),
@@ -430,13 +545,13 @@ function paint(map: MlMap, addresses: AddressState[], now: number, mode: MapMode
     type: 'FeatureCollection',
     features: zoneSummaries(addresses.filter((a) => a.inside_perimeter), now).map((z) => {
       const members = addresses.filter((a) => a.zone_id === z.zone_id);
-      const radius = Math.max(340, ...members.map((a) => haversine([z.lat, z.lng], [a.lat, a.lng]))) * 1.2;
+      const radius = Math.max(340, ...members.map((a) => haversine([z.lat, z.lng], [a.lat, a.lng]))) * 1.05;
       return {
         type: 'Feature',
         geometry: { type: 'Polygon', coordinates: [circlePolygon(z.lat, z.lng, radius)] },
         properties: {
           color: URGENCY_COLOR[z.urgency],
-          fillOpacity: z.urgency === 'clear' ? 0.05 : 0.14,
+          fillOpacity: z.urgency === 'clear' ? 0.05 : 0.12,
           label: `${z.zone_id} · ${z.unresolved}/${z.total}`,
         },
       } satisfies GeoJSON.Feature;
@@ -450,6 +565,18 @@ function paint(map: MlMap, addresses: AddressState[], now: number, mode: MapMode
   if (map.getLayer('heat')) {
     map.setLayoutProperty('heat', 'visibility', heatMode ? 'visible' : 'none');
   }
+}
+
+/** Fallback outline, about the footprint of a small house, for a household with no ring. */
+function squareAround(lat: number, lng: number): [number, number][] {
+  const d = metresToDegrees(9, lat);
+  return [
+    [lng - d.lng, lat - d.lat],
+    [lng + d.lng, lat - d.lat],
+    [lng + d.lng, lat + d.lat],
+    [lng - d.lng, lat + d.lat],
+    [lng - d.lng, lat - d.lat],
+  ];
 }
 
 const escapeHtml = (s: string): string =>

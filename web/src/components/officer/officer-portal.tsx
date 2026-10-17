@@ -33,6 +33,7 @@ export function OfficerPortal() {
 
   const [zone, setZone] = useState<string | null>(null);
   const [onlyUnresolved, setOnlyUnresolved] = useState(true);
+  const [shown, setShown] = useState(25);
 
   const zones = useMemo(() => {
     const ids = [...new Set(addresses.map((a) => a.zone_id))];
@@ -53,12 +54,16 @@ export function OfficerPortal() {
     [addresses, activeZone],
   );
 
-  const visible = useMemo(() => {
+  const matching = useMemo(() => {
     const list = onlyUnresolved
       ? inZone.filter((a) => URGENCY_RANK[urgencyOf(a, now)] <= URGENCY_RANK.watch)
       : inZone;
     return [...list].sort(sortByUrgency(now));
   }, [inZone, onlyUnresolved, now]);
+
+  // A zone holds a few hundred households. The list is worst-first and an officer works the
+  // top of it, so drawing every card would cost a lot of phone for nothing.
+  const visible = useMemo(() => matching.slice(0, shown), [matching, shown]);
 
   const remaining = unresolvedIn(addresses, activeZone, now);
 
@@ -104,7 +109,10 @@ export function OfficerPortal() {
               <button
                 key={z}
                 type="button"
-                onClick={() => setZone(z)}
+                onClick={() => {
+                  setZone(z);
+                  setShown(25);
+                }}
                 aria-pressed={selected}
                 className={`shrink-0 rounded-full border px-3.5 py-1.5 text-sm font-medium transition-colors ${
                   selected ? 'border-info/70 bg-info/15 text-text' : 'border-line bg-panel text-muted'
@@ -131,7 +139,10 @@ export function OfficerPortal() {
         </div>
         <button
           type="button"
-          onClick={() => setOnlyUnresolved((v) => !v)}
+          onClick={() => {
+            setOnlyUnresolved((v) => !v);
+            setShown(25);
+          }}
           className="shrink-0 rounded-lg border border-line px-2.5 py-1.5 text-xs font-medium text-muted transition-colors active:bg-panel-2"
         >
           {onlyUnresolved ? 'Show all' : 'Needs a knock'}
@@ -151,7 +162,20 @@ export function OfficerPortal() {
             {addresses.length === 0 ? 'Loading your list…' : 'Nothing left in this zone.'}
           </p>
         ) : (
-          visible.map((a) => <AddressCard key={a.id} address={a} now={now} onRecord={record} />)
+          <>
+            {visible.map((a) => (
+              <AddressCard key={a.id} address={a} now={now} onRecord={record} />
+            ))}
+            {matching.length > visible.length && (
+              <button
+                type="button"
+                onClick={() => setShown((n) => n + 25)}
+                className="w-full rounded-xl border border-line bg-panel py-3.5 text-sm font-medium text-muted active:bg-panel-2"
+              >
+                Show 25 more · {(matching.length - visible.length).toLocaleString()} left
+              </button>
+            )}
+          </>
         )}
       </main>
     </div>
