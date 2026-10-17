@@ -39,7 +39,7 @@
   --color-clear: var(--clear);
   --color-info: var(--info);
   --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  --font-mono: "Geist Mono", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
 }
 
 html {
@@ -55,49 +55,111 @@ body {
   -webkit-tap-highlight-color: transparent;
 }
 
-/* Leaflet's own stylesheet is imported by the map component; these align it to the theme. */
-.leaflet-container {
-  background: #0b0f14;
+/*
+ * The map is a paper surface inset into the dark console, matching the reference build's
+ * warm-paper palette. Tokens are its values, so the two read as one system.
+ */
+:root {
+  --paper: #f4efe6;
+  --paper-card: #fbf8f2;
+  --paper-wash: #efe8dc;
+  --paper-rule: #e2dbcf;
+  --paper-rule-soft: #ebe5da;
+  --paper-ink: #1f1a14;
+  --paper-ink-2: #6f665a;
+  --paper-soft: #8a8173;
+  --paper-accent: #a9392a;
+}
+
+@theme inline {
+  --color-paper: var(--paper);
+  --color-paper-card: var(--paper-card);
+  --color-paper-wash: var(--paper-wash);
+  --color-paper-rule: var(--paper-rule);
+  --color-paper-rule-soft: var(--paper-rule-soft);
+  --color-paper-ink: var(--paper-ink);
+  --color-paper-ink-2: var(--paper-ink-2);
+  --color-paper-soft: var(--paper-soft);
+  --color-paper-accent: var(--paper-accent);
+}
+
+/* Mono uppercase label, the eyebrow from the reference. */
+.eyebrow {
+  font: 500 11px/1.2 var(--font-mono);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--paper-ink-2);
+}
+
+.eyebrow-dark {
+  font: 500 11px/1.2 var(--font-mono);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+/* Libre Caslon Display, with the reference's own Georgia fallback if the font never loads. */
+.display {
+  font-family: "Libre Caslon Display", Georgia, "Times New Roman", serif;
+  font-weight: 400;
+}
+
+.maplibregl-map {
   font-family: var(--font-sans);
 }
 
-.leaflet-tile-pane {
-  /* OSM tiles are built for light UI. Dimmed and desaturated so status colours dominate. */
-  filter: invert(1) hue-rotate(185deg) brightness(0.82) contrast(0.92) saturate(0.55);
+/* Controls on paper, not MapLibre's default white-on-blue. */
+.maplibregl-ctrl-group {
+  background: var(--paper-card) !important;
+  border: 1px solid var(--paper-rule) !important;
+  box-shadow: 0 8px 20px -14px rgb(43 29 18 / 0.5) !important;
 }
 
-.leaflet-control-zoom a,
-.leaflet-bar {
-  background: var(--panel-2) !important;
-  color: var(--text) !important;
-  border-color: var(--line) !important;
+.maplibregl-ctrl-group button + button {
+  border-top: 1px solid var(--paper-rule-soft) !important;
 }
 
-.leaflet-popup-content-wrapper,
-.leaflet-popup-tip {
-  background: var(--panel-2);
-  color: var(--text);
-  border: 1px solid var(--line);
-  box-shadow: 0 10px 30px rgb(0 0 0 / 0.5);
+.maplibregl-ctrl-group button .maplibregl-ctrl-icon {
+  filter: none;
 }
 
-.leaflet-popup-content {
-  margin: 0.75rem 0.9rem;
+.maplibregl-ctrl-scale {
+  background: rgb(251 248 242 / 0.8) !important;
+  border-color: var(--paper-rule) !important;
+  color: var(--paper-ink-2) !important;
+  font: 500 10px/1.4 var(--font-mono) !important;
+  letter-spacing: 0.06em;
+}
+
+.maplibregl-ctrl-attrib {
+  background: rgb(251 248 242 / 0.85) !important;
+  font-size: 10px !important;
+}
+
+.maplibregl-ctrl-attrib a {
+  color: var(--paper-ink-2) !important;
+}
+
+.maplibregl-popup-content {
+  background: var(--paper-card);
+  color: var(--paper-ink);
+  border: 1px solid var(--paper-rule);
+  border-radius: 0.5rem;
+  padding: 0.75rem 0.9rem;
   font-size: 0.8125rem;
   line-height: 1.45;
+  box-shadow: 0 16px 36px -20px rgb(43 29 18 / 0.6);
 }
 
-.leaflet-popup-close-button {
-  color: var(--muted) !important;
+.maplibregl-popup-tip {
+  border-top-color: var(--paper-card) !important;
+  border-bottom-color: var(--paper-card) !important;
 }
 
-.leaflet-control-attribution {
-  background: rgb(11 15 20 / 0.75) !important;
-  color: var(--muted) !important;
-}
-
-.leaflet-control-attribution a {
-  color: var(--muted) !important;
+.maplibregl-popup-close-button {
+  color: var(--paper-ink-2);
+  font-size: 1rem;
+  padding: 0 0.35rem;
 }
 
 @media (prefers-reduced-motion: reduce) {
