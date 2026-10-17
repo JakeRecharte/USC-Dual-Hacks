@@ -41,9 +41,10 @@ export function sayForLookup(lookup, subjectName, now, freshMin) {
   }
 }
 
+// Transfers say nothing here: the transfer tool itself says "Transferring you now."
 export const sayForRouting = {
-  human_now: "I'm connecting you to a person right now. Please stay on the line.",
-  priority_queue: "I've moved your call to the front of the queue and I'm connecting you to a call-taker now. Please stay on the line.",
+  human_now: '',
+  priority_queue: '',
   answered_by_agent: 'If you have any newer information, or you think they may be hurt, I can connect you to a person.',
   scheduled_followup: "I've logged this and flagged a follow-up check. If anything changes, or you think they may be hurt, tell me now or call back.",
 };

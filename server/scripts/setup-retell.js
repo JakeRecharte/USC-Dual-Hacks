@@ -113,8 +113,10 @@ if (number) {
   await retell.phoneNumber.update(number, {
     inbound_agents: [{ agent_id: inboundId, weight: 1, agent_version: 'latest' }],
     outbound_agents: [], // inbound only: the number never places calls
+    // If all concurrent call slots are busy, ring the dispatcher instead of failing.
+    ...(DISPATCHER && { fallback_number: DISPATCHER }),
   });
-  console.log(`${number} → inbound ${INBOUND_NAME}, outbound disabled`);
+  console.log(`${number} → inbound ${INBOUND_NAME}, outbound disabled, fallback ${DISPATCHER || 'none'}`);
 } else {
   console.log('No number yet. Buy one in the dashboard, or re-run with --buy <area code>.');
 }
