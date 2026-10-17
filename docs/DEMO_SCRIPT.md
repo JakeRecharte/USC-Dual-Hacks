@@ -12,39 +12,40 @@ Two screens: a **laptop** on `/dispatch` (shared/projected) and a **phone** on `
 
 1. `cd web && npm run dev`, or `npm run build && npm start`.
 2. Laptop: sign in at `/` as **dispatch**, code `5150`. Leave it on `/dispatch`.
-3. Phone: sign in as **officer**, code `1420`. Zone **PAC-3** opens by default (it picks
-   whichever zone has the most doors left). **Tap over to PAC-2** — that's where beat 2 is.
+3. Phone: sign in as **officer**, code `1420`. It opens on whichever zone has the most doors
+   left. **Tap over to PAL-06, Huntington Palisades** — that's where beat 2 is.
 4. Click **Reset demo data** in the dispatch header. Do this between every take.
 5. Confirm both feeds are green in the header: *Status feed live*, *Call feed live*. If the
    call feed is not live, see the fallback at the bottom.
-6. Map on **Heat**. Have the phone already scrolled to **640 Toyopa Dr**.
+6. Map on **Density**. Have the phone already scrolled to **640 Toyopa Dr**.
 
-A clean reset shows **19 unresolved of 28**, **3 refused**, **6 never contacted**,
-**4 stale clears**, and the zone strip reading PAC-3 `7/7`, PAC-2 `5/9`, PAC-4 `5/6`,
-PAC-1 `2/6`. If those don't match, you didn't reset.
+A clean reset shows **40 unresolved of 77**, **4 refused**, **15 never contacted**,
+**7 stale clears**, and the zone strip led by Marquez Knolls `PAL-02` at `9/9`. If those
+don't match, you didn't reset.
 
 ---
 
 ## Beat 1 — the board (0:00–0:30)
 
-**Show:** the dispatch map on Heat.
+**Show:** the dispatch map on Density.
 
-> "This is an evacuation zone during a wildfire. Every dot is a house. The heat is not
-> population — it's **where we still don't know if anyone is home**. Bright means officers
-> are needed. It fades as doors get answered."
+> "This is Pacific Palisades during a wildfire — seventy-seven households, from the coast at
+> Castellammare up into the Highlands. Every dot is a home. The heat is not population — it's
+> **where we still don't know if anyone is inside**. Dark means officers are needed. It fades
+> as doors get answered."
 
-Click **Zones**. Zone circles and the `13/28` labels come up.
+Click **Zones**. Zone circles and the `9/9` labels come up.
 
-> "Marquez Knolls, PAC-3 — seven houses, not one of them answered yet. No crew has reached
-> that street. That's where the next one goes."
+> "Marquez Knolls — nine homes, not one of them answered yet. No crew has reached that
+> street. That's where the next one goes."
 
-Click back to **Heat**.
+Click back to **Density**.
 
 **Why it matters:** the fade is the whole point. Say it now, because beat 2 shows it happening.
 
 ## Beat 2 — the officer taps Refused (0:30–1:00)
 
-**Show:** the phone, zone **PAC-2**. Scroll to **640 Toyopa Dr**, Beatrice Lam — currently
+**Show:** the phone, zone **PAL-06**. Scroll to **640 Toyopa Dr**, Beatrice Lam — currently
 *Unknown*, no contact ever recorded.
 
 > "An officer is at the door. Three buttons, one hand, gloves on."
@@ -52,9 +53,9 @@ Click back to **Heat**.
 Open **Structure and notes**, type `two adults staying, won't leave the dogs`, then tap
 **Refused**.
 
-**Watch the laptop.** Inside a second: the dot goes from orange to red, the heat deepens over
-PAC-2, **Refused** ticks `3 → 4`, **Never contacted** ticks `6 → 5`, and the address jumps to
-the top of the door-knock list with the note under it.
+**Watch the laptop.** Inside a second: the dot turns deep red, the heat deepens over
+Huntington, **Refused** ticks `4 → 5`, **Never contacted** ticks `15 → 14`, and the address
+jumps to the top of the door-knock list with the note under it.
 
 > "No refresh, no sync button. Dispatch saw that before the officer put the phone away."
 
@@ -137,7 +138,7 @@ mail piling up.
 | **Call feed is not live** | **Simulate call** in the dispatch header has all four beats as canned rows that match the routing table. The map and officer flow are unaffected. Say "simulated" out loud if asked. |
 | **The phone won't connect** | Open `/officer` in a second browser window on the laptop, narrow, beside the board. The split screen actually reads better on video. |
 | **A call drops mid-demo** | Keep going and narrate the board. The queue row is already there from the `lookup` event — it shows *"call in progress"* before routing lands. |
-| **The map won't load** | Tiles come from OpenStreetMap and need the network. On a bad room wifi, switch to **Zones** (fewer tile requests) or fall back to the door-knock list, which carries the same information as text. |
+| **The map won't load** | Basemap tiles come from OpenFreeMap and need the network. The perimeter, zones and households are drawn from local data and still render over a blank ground, so the demo survives it. Failing that, the door-knock list carries the same information as text. |
 | **Everything is wrong** | `POST /api/reset`, or the **Reset demo data** button. Five seconds, and the fake data is back exactly as the script expects. |
 
 ### One seam to know about before you narrate it

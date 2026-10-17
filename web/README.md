@@ -79,5 +79,14 @@ anon key but shows an amber warning, because that state should not ship.
   `status`, it never reaches the voice agent, and `/api/status` rejects it as a status value.
   See `docs/FRONTEND_CONTRACT.md`.
 - **Reset between demo runs.** The button in the dispatch header, or `POST /api/reset`.
-- **Map colours are validated, not chosen by eye.** See the note on the urgency tokens in
-  `src/app/globals.css` before changing them.
+- **Map colours are validated, not chosen by eye.** The urgency steps were run through a
+  contrast and colour-vision check against the paper ground; the note on `URGENCY_COLOR` in
+  `src/lib/priority.ts` has the numbers. Re-run that check before changing them.
+- **The map is MapLibre, not Leaflet.** The basemap is a vector style drawn in the paper
+  palette (`src/components/dispatch/zone-map.tsx`), which is why it can be recoloured at all —
+  raster tiles cannot. Tiles and glyphs come from OpenFreeMap, keyless. If the network is
+  down the basemap is blank but the perimeter, zones and households still draw, because they
+  come from local data.
+- **Geography is real.** The perimeter traces Pacific Palisades from the coast into Santa Ynez
+  Canyon, and the eight zones are its actual districts. `inside_perimeter` is computed from
+  the polygon, never stored, and a test asserts it agrees with every household's zone.

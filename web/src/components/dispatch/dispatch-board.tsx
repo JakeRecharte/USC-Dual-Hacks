@@ -4,6 +4,7 @@ import dynamic from 'next/dynamic';
 import { useMemo, useState } from 'react';
 import { ZONE_NAMES } from '@/lib/addresses';
 import {
+  HEAT_STOPS,
   URGENCY_COLOR,
   doorKnockList,
   isStale,
@@ -135,7 +136,7 @@ export function DispatchBoard() {
             />
           </div>
 
-          <div className="relative min-h-[420px] flex-1 overflow-hidden rounded-2xl border border-line bg-panel">
+          <div className="relative min-h-[460px] flex-1 overflow-hidden rounded-2xl border border-line bg-paper">
             <ZoneMap
               addresses={addresses}
               mode={mode}
@@ -146,18 +147,20 @@ export function DispatchBoard() {
 
             <div className="pointer-events-none absolute inset-x-0 top-0 z-[500] flex flex-wrap items-start justify-between gap-2 p-3">
               <Legend mode={mode} />
-              <div className="pointer-events-auto flex rounded-lg border border-line bg-bg/90 p-0.5 backdrop-blur">
+              <div className="pointer-events-auto flex rounded-lg border border-paper-rule bg-paper-card/95 p-0.5 shadow-[0_12px_28px_-18px_rgba(43,29,18,.6)] backdrop-blur">
                 {(['heat', 'zones'] as MapMode[]).map((m) => (
                   <button
                     key={m}
                     type="button"
                     onClick={() => setMode(m)}
                     aria-pressed={mode === m}
-                    className={`rounded-md px-3 py-1.5 text-xs font-semibold capitalize transition-colors ${
-                      mode === m ? 'bg-info text-bg' : 'text-muted hover:text-text'
+                    className={`rounded-md px-3 py-1.5 font-mono text-[11px] font-medium uppercase tracking-[0.12em] transition-colors ${
+                      mode === m
+                        ? 'bg-paper-ink text-paper-card'
+                        : 'text-paper-ink-2 hover:text-paper-ink'
                     }`}
                   >
-                    {m === 'heat' ? 'Heat' : 'Zones'}
+                    {m === 'heat' ? 'Density' : 'Zones'}
                   </button>
                 ))}
               </div>
@@ -219,39 +222,43 @@ const LEGEND_ITEMS: { urgency: Urgency; label: string }[] = [
   { urgency: 'clear', label: 'Cleared' },
 ];
 
+/**
+ * Key for the map. Reads the same stops the heat ramp is built from, so the two cannot
+ * drift, and labels every colour rather than relying on hue alone.
+ */
 function Legend({ mode }: { mode: MapMode }) {
+  const gradient = `linear-gradient(90deg, rgba(244,239,230,0), ${HEAT_STOPS.map(([, c]) => c).join(', ')})`;
+
   return (
-    <div className="pointer-events-auto rounded-lg border border-line bg-bg/90 px-3 py-2.5 backdrop-blur">
-      <p className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-muted">
-        {mode === 'heat' ? 'Door-knock density' : 'Zone priority'}
-      </p>
+    <div className="pointer-events-auto w-48 rounded-lg border border-paper-rule bg-paper-card/95 px-3 py-2.5 shadow-[0_12px_28px_-16px_rgba(43,29,18,.5)] backdrop-blur sm:w-56">
+      <div className="eyebrow">{mode === 'heat' ? 'Still to reach' : 'Zone priority'}</div>
+
       {mode === 'heat' && (
-        <div className="mb-2">
-          <div
-            aria-hidden
-            className="h-2 w-40 rounded-full"
-            style={{
-              background: `linear-gradient(to right, rgb(253 224 71 / 0.15), ${URGENCY_COLOR.watch}, ${URGENCY_COLOR.high}, ${URGENCY_COLOR.critical})`,
-            }}
-          />
-          <div className="mt-1 flex justify-between text-xs text-muted">
+        <>
+          <div aria-hidden className="mt-2 h-2 rounded-sm" style={{ background: gradient }} />
+          <div className="mt-1 flex justify-between font-mono text-[11px] text-paper-ink-2">
             <span>handled</span>
             <span>needs officers</span>
           </div>
-        </div>
+        </>
       )}
-      <ul className="grid gap-1">
+
+      <ul className={`grid gap-1 ${mode === 'heat' ? 'mt-2 border-t border-paper-rule-soft pt-2' : 'mt-2'}`}>
         {LEGEND_ITEMS.map((i) => (
-          <li key={i.urgency} className="flex items-center gap-2 text-xs text-muted">
+          <li key={i.urgency} className="flex items-center gap-2 text-[11px] text-paper-ink-2">
             <span
               aria-hidden
-              className="h-2.5 w-2.5 shrink-0 rounded-full ring-1 ring-bg"
+              className="inline-block h-2.5 w-2.5 shrink-0 rounded-full ring-1 ring-paper"
               style={{ background: URGENCY_COLOR[i.urgency] }}
             />
             {i.label}
           </li>
         ))}
       </ul>
+
+      <p className="mt-2 border-t border-paper-rule-soft pt-2 text-[11px] leading-snug text-paper-soft">
+        Dashed outline is the active fire perimeter.
+      </p>
     </div>
   );
 }

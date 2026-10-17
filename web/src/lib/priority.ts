@@ -10,16 +10,30 @@ export type Urgency = 'critical' | 'high' | 'watch' | 'clear';
 export const URGENCY_RANK: Record<Urgency, number> = { critical: 0, high: 1, watch: 2, clear: 3 };
 
 /**
- * Kept in step with the tokens in globals.css. Validated against the #0b0f14 surface:
- * worst adjacent pair 16.2 ΔE normal vision, 12.2 ΔE deuteranopia. Always paired with a
- * text label, so status is never carried by colour alone.
+ * Urgency on the paper map surface. Validated against the #f4efe6 ground: worst adjacent
+ * pair 16.2 ΔE normal vision, 14.3 ΔE CVD, every step at least 3:1 contrast. The slate and
+ * the green are deliberately low-chroma — they are the reference build's own context and
+ * "ok" colours — and every use carries a text label, so status is never colour alone.
  */
 export const URGENCY_COLOR: Record<Urgency, string> = {
-  critical: '#ef4444',
-  high: '#fb923c',
-  watch: '#fde047',
-  clear: '#34d399',
+  critical: '#9b2c1f',
+  high: '#bf6a12',
+  watch: '#7d8a96',
+  clear: '#2f6b4f',
 };
+
+/**
+ * Door-knock density: a sequential single-hue ember ramp, light to dark, the same structure
+ * as the reference's capacity ramp. Not green-to-red — that is the worst case for red-green
+ * colourblindness, because the safe end and the dangerous end become the same colour. Here
+ * low density simply fades into the paper, so "no heat" means the block is handled.
+ */
+export const HEAT_STOPS: ReadonlyArray<readonly [stop: number, color: string]> = [
+  [0.25, '#e8b04b'],
+  [0.5, '#d4841f'],
+  [0.75, '#b4511b'],
+  [1, '#8f2e21'],
+];
 
 /** Heat weight, 0–1. Feeds the density layer; also the sort key inside an urgency band. */
 export const URGENCY_WEIGHT: Record<Urgency, number> = {
