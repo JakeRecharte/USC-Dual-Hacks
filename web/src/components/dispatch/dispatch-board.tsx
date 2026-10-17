@@ -175,7 +175,10 @@ export function DispatchBoard() {
           <ZoneStrip zones={zones} />
         </section>
 
-        <aside className="flex min-w-0 flex-col gap-4">
+        {/* On wide screens the sidebar takes its height from the map column instead of setting
+            it: h-0 keeps its content out of the row's sizing and min-h-full stretches it back.
+            Without this a long door-knock list makes the row (and so the map) thousands of px tall. */}
+        <aside className="flex min-w-0 flex-col gap-4 lg:h-0 lg:min-h-full">
           <CallQueue calls={queue} now={now} configured={telephonyConfigured} />
           <DoorKnockPanel knocks={knocks} now={now} onFocus={setFocusId} focusId={focusId} />
         </aside>
