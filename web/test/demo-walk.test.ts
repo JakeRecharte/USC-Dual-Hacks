@@ -61,9 +61,8 @@ describe('demoRoute', () => {
   it('keeps the officer among the households for the whole walk', () => {
     const route = demoRoute(addresses, ANCHOR);
     const length = routeLength(route);
-    // The tracked households are sparse enough that a 150 ft radius is sometimes empty —
-    // which is exactly when the map falls back to the nearest handful. What has to hold is
-    // that the handful is next door rather than across the county, everywhere on the walk.
+    // What has to hold is that there is always a house next door rather than across the
+    // county, everywhere along the walk.
     for (let d = 0; d <= length; d += 2) {
       const at = pointAlong(route, d);
       assert.ok(at);

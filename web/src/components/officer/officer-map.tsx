@@ -10,12 +10,12 @@
 //   * the basemap is lighter and the status fills are opaque, because this screen is read
 //     in direct sunlight with the brightness already at maximum.
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import * as maplibreNs from 'maplibre-gl';
 import type { Map as MlMap, StyleSpecification } from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { STATUS_COLOR } from '@/lib/priority';
-import type { LatLng } from '@/lib/geo';
+import { NEARBY_RADIUS_M, type LatLng } from '@/lib/geo';
 import type { OfficerPosition } from '@/lib/officer-position';
 import type { AddressState } from '@/lib/types';
 
@@ -35,8 +35,12 @@ const maplibregl = ((maplibreNs as unknown as { default?: typeof maplibreNs }).d
 const PAPER = '#fbf9f5';
 const LABELS = 'basemap-labels';
 
-/** Street level. Below 15 the officer is no longer looking at their own surroundings. */
-const MIN_ZOOM = 15;
+/**
+ * Low enough to take in the whole perimeter. Pacific Palisades is about 9 km across, which
+ * needs roughly z12.5 on a phone, so z12 fits it with margin — an officer should be able to
+ * pull back and see the whole incident, then dive back to their own street.
+ */
+const MIN_ZOOM = 12;
 /** Past the z14 vector source MapLibre overzooms, which stays sharp: geometry, not pixels. */
 const MAX_ZOOM = 20;
 /** Tight enough that individual houses are distinct and one-handed targets. */
@@ -190,6 +194,7 @@ export function OfficerMap({
   route,
   follow,
   selectedId,
+  continuous,
   onSelect,
   onBreakFollow,
   onRecenterReady,
@@ -201,6 +206,8 @@ export function OfficerMap({
   route: LatLng[];
   follow: boolean;
   selectedId: string | null;
+  /** True when positions arrive many times a second, as they do while driving by keyboard. */
+  continuous: boolean;
   onSelect: (id: string | null) => void;
   /** Called on the officer's first drag or pinch, which ends follow mode. */
   onBreakFollow: () => void;
@@ -212,12 +219,18 @@ export function OfficerMap({
   const readyRef = useRef(false);
   const outlinesRef = useRef<Map<string, [number, number][]> | null>(null);
   // Latest props, so MapLibre's own handlers always see current values without rebinding.
-  const stateRef = useRef({ households, position, route, selectedId, follow });
-  stateRef.current = { households, position, route, selectedId, follow };
+  const stateRef = useRef({ households, position, route, selectedId, follow, continuous });
+  stateRef.current = { households, position, route, selectedId, follow, continuous };
   const callbacks = useRef({ onSelect, onBreakFollow });
   callbacks.current = { onSelect, onBreakFollow };
   /** Set while the component is moving the map itself, so follow does not break itself. */
   const programmatic = useRef(false);
+  /**
+   * MapLibre reports a missing WebGL context, an unreachable style and a failed tile
+   * request through `error`, and swallows them if nothing is listening — which leaves an
+   * officer looking at a blank screen with no idea why. Surfaced on the map itself.
+   */
+  const [mapError, setMapError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!hostRef.current || mapRef.current) return;
@@ -239,6 +252,14 @@ export function OfficerMap({
       attributionControl: { compact: true },
     });
     mapRef.current = map;
+
+    map.on('error', (e) => {
+      const message = (e as { error?: { message?: string } }).error?.message ?? 'unknown map error';
+      // Logged as well as shown: the console carries the stack, the banner carries the gist.
+      console.error('[officer-map]', message, e);
+      setMapError(message);
+    });
+
     map.touchZoomRotate.disableRotation();
     map.addControl(new maplibregl.ScaleControl({ unit: 'imperial' }), 'bottom-left');
 
@@ -247,18 +268,26 @@ export function OfficerMap({
       if (!bySite || abort.signal.aborted) return;
       outlinesRef.current = bySite;
       const m = mapRef.current;
-      if (m && readyRef.current) paint(m, stateRef.current, outlinesRef.current);
+      if (!m || !readyRef.current) return;
+      const { households: hs, selectedId: sel } = stateRef.current;
+      paintHouses(m, hs, bySite);
+      paintSelection(m, hs, sel, bySite);
     });
 
     map.on('load', () => {
       map.addSource('houses', { type: 'geojson', data: emptyCollection() });
+      map.addSource('selected', { type: 'geojson', data: emptyCollection() });
+      map.addSource('range', { type: 'geojson', data: emptyCollection() });
       map.addSource('walk', { type: 'geojson', data: emptyCollection() });
       map.addSource('officer', { type: 'geojson', data: emptyCollection() });
       map.addSource('accuracy', { type: 'geojson', data: emptyCollection() });
       map.addSource('cone', { type: 'geojson', data: emptyCollection() });
 
-      // The houses in range, drawn as the real shape of the building, filled solid. On the
-      // board these are translucent; here the officer needs the answer from arm's length.
+      // Every tracked household, drawn as the real shape of the building and filled solid.
+      // All of them, not just the ones in range: a house that blinks out of existence
+      // because the officer took two steps is worse than useless, and MapLibre does not
+      // care about eight thousand small polygons. The nearby radius is a ring around the
+      // officer and a count in the header, not a reason to hide a house.
       map.addLayer({
         id: 'house-fill', type: 'fill', source: 'houses',
         filter: ['==', ['geometry-type'], 'Polygon'],
@@ -267,12 +296,27 @@ export function OfficerMap({
       map.addLayer({
         id: 'house-line', type: 'line', source: 'houses',
         filter: ['==', ['geometry-type'], 'Polygon'],
+        paint: { 'line-color': ['get', 'color'], 'line-width': 1.5, 'line-opacity': 1 },
+      }, LABELS);
+
+      // The selected house gets its own layer rather than a property on all two thousand,
+      // so changing the selection redraws one ring instead of rebuilding every footprint.
+      map.addLayer({
+        id: 'selected-line', type: 'line', source: 'selected',
+        paint: { 'line-color': '#1f1a14', 'line-width': 3.5, 'line-opacity': 0.95 },
+      }, LABELS);
+
+      // Below the zoom where a footprint covers more than a pixel or two, dots read better.
+      // Without these, zooming out to the whole incident shows an empty map.
+      map.addLayer({
+        id: 'house-dot', type: 'circle', source: 'houses',
+        filter: ['==', ['geometry-type'], 'Point'],
+        maxzoom: 16.5,
         paint: {
-          'line-color': ['get', 'color'],
-          // The selected house carries a heavy ring, so the sheet is unambiguous about
-          // which building it is about.
-          'line-width': ['case', ['get', 'selected'], 4, 1.5],
-          'line-opacity': 1,
+          'circle-radius': ['interpolate', ['linear'], ['zoom'], 12, 1.6, 14, 2.6, 16.5, 5],
+          'circle-color': ['get', 'color'],
+          'circle-opacity': ['interpolate', ['linear'], ['zoom'], 15.5, 1, 16.5, 0],
+          'circle-stroke-width': 0,
         },
       }, LABELS);
 
@@ -296,13 +340,28 @@ export function OfficerMap({
       map.addLayer({
         id: 'house-tap', type: 'circle', source: 'houses',
         filter: ['==', ['geometry-type'], 'Point'],
-        paint: { 'circle-radius': 26, 'circle-color': '#000000', 'circle-opacity': 0 },
+        paint: {
+          // Zoomed in it is wider than a gloved thumb; zoomed out it has to stay smaller
+          // than the gap between houses or every tap would land on whichever came first.
+          'circle-radius': ['interpolate', ['linear'], ['zoom'], 12, 3, 15, 7, 17, 20, 18, 26],
+          'circle-color': '#000000',
+          'circle-opacity': 0,
+        },
       });
 
       map.addLayer({
         id: 'walk', type: 'line', source: 'walk',
         paint: { 'line-color': '#38bdf8', 'line-width': 3, 'line-opacity': 0.5, 'line-dasharray': [2, 2] },
       }, LABELS);
+
+      // The radius the header counts, shown rather than implied.
+      map.addLayer({
+        id: 'range-line', type: 'line', source: 'range',
+        paint: {
+          'line-color': '#1d7fd4', 'line-width': 1.5, 'line-opacity': 0.5,
+          'line-dasharray': [3, 3],
+        },
+      });
 
       map.addLayer({
         id: 'accuracy-fill', type: 'fill', source: 'accuracy',
@@ -354,7 +413,10 @@ export function OfficerMap({
       map.on('mouseleave', 'house-tap', () => { map.getCanvas().style.cursor = ''; });
 
       readyRef.current = true;
-      paint(map, stateRef.current, outlinesRef.current);
+      const first = stateRef.current;
+      paintHouses(map, first.households, outlinesRef.current);
+      paintSelection(map, first.households, first.selectedId, outlinesRef.current);
+      paintOfficer(map, first.position, first.route);
       const p = stateRef.current.position;
       if (p) map.jumpTo({ center: [p.lng, p.lat], zoom: FOLLOW_ZOOM });
     });
@@ -397,12 +459,25 @@ export function OfficerMap({
     });
   }, [onRecenterReady]);
 
-  // Repaint on data, position or selection change.
+  // Houses change when a status does, which is rare. Kept well away from the position.
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !readyRef.current) return;
-    paint(map, { households, position, route, selectedId }, outlinesRef.current);
-  }, [households, position, route, selectedId]);
+    paintHouses(map, households, outlinesRef.current);
+  }, [households]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !readyRef.current) return;
+    paintSelection(map, households, selectedId, outlinesRef.current);
+  }, [households, selectedId]);
+
+  // The hot path: twenty times a second while driving, and only five small features.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !readyRef.current) return;
+    paintOfficer(map, position, route);
+  }, [position, route]);
 
   // Follow mode. Nothing here runs while follow is off, which is what makes a drag stick:
   // the next GPS tick moves the dot and leaves the frame exactly where the officer put it.
@@ -410,29 +485,39 @@ export function OfficerMap({
     const map = mapRef.current;
     if (!map || !readyRef.current || !follow || !position) return;
     programmatic.current = true;
-    map.easeTo({
-      center: [position.lng, position.lat],
-      // Centre only. A pinch ends follow mode, so while follow is on the zoom is whatever
-      // follow last set it to and there is nothing here to fight over.
-      padding: sheetPadding(selectedId != null),
-      duration: 600,
-      essential: true,
-    });
+    // Centre only. A pinch ends follow mode, so while follow is on the zoom is whatever
+    // follow last set it to and there is nothing here to fight over.
+    const centre = { center: [position.lng, position.lat] as [number, number], padding: sheetPadding(selectedId != null) };
+    if (continuous) {
+      // The position itself is already moving smoothly, so easing on top of it only adds
+      // lag between the key and the map.
+      map.jumpTo(centre);
+      programmatic.current = false;
+      return;
+    }
+    map.easeTo({ ...centre, duration: 600, essential: true });
     const done = () => { programmatic.current = false; };
     map.once('moveend', done);
     return () => {
       map.off('moveend', done);
       programmatic.current = false;
     };
-  }, [follow, position, selectedId]);
+  }, [follow, position, selectedId, continuous]);
 
   return (
-    <div
-      ref={hostRef}
-      className="h-full w-full"
-      role="application"
-      aria-label="Map of the houses around you"
-    />
+    <div className="relative h-full w-full">
+      <div
+        ref={hostRef}
+        className="h-full w-full"
+        role="application"
+        aria-label="Map of the houses around you"
+      />
+      {mapError && (
+        <p className="absolute inset-x-3 bottom-20 z-10 rounded-xl border border-critical/50 bg-bg px-3 py-2.5 text-xs leading-relaxed text-critical">
+          <span className="font-semibold">The map could not draw.</span> {mapError}
+        </p>
+      )}
+    </div>
   );
 }
 
@@ -449,50 +534,74 @@ const sheetPadding = (sheetOpen: boolean) => ({
 /** The leading house number, which is all that fits on a roof. */
 const houseNumber = (address: string) => address.split(' ')[0] ?? '';
 
-function paint(
+/**
+ * The households. Rebuilt only when the address list changes — never on a position update,
+ * because while the officer drives, positions arrive twenty times a second and rebuilding
+ * two thousand polygons at that rate would be the one thing that makes this map slow.
+ */
+function paintHouses(
   map: MlMap,
-  state: {
-    households: AddressState[];
-    position: OfficerPosition | null;
-    route: LatLng[];
-    selectedId: string | null;
-  },
+  households: AddressState[],
   outlines: Map<string, [number, number][]> | null,
 ): void {
-  const { households, position, route, selectedId } = state;
-
   const houses = map.getSource('houses') as maplibregl.GeoJSONSource | undefined;
-  if (houses) {
-    houses.setData({
-      type: 'FeatureCollection',
-      features: households.flatMap((a) => {
-        const ring = outlines?.get(siteKey(a.lat, a.lng)) ?? squareAround(a.lat, a.lng);
-        const shared = {
-          id: a.id,
-          color: STATUS_COLOR[a.status],
-          // `unknown` is drawn lighter than `no_answer`: same colour, different weight, so
-          // "never contacted" and "knocked, nobody home" are not the same mark.
-          fillOpacity: a.status === 'unknown' ? 0.4 : 0.82,
-          selected: a.id === selectedId,
-          number: houseNumber(a.address),
-        };
-        return [
-          {
-            type: 'Feature',
-            geometry: { type: 'Polygon', coordinates: [ring] },
-            properties: shared,
-          },
-          // The tap target and the roof label hang off the centroid, not the outline.
-          {
-            type: 'Feature',
-            geometry: { type: 'Point', coordinates: [a.lng, a.lat] },
-            properties: shared,
-          },
-        ] satisfies GeoJSON.Feature[];
-      }),
-    });
-  }
+  if (!houses) return;
 
+  houses.setData({
+    type: 'FeatureCollection',
+    features: households.flatMap((a) => {
+      const ring = outlines?.get(siteKey(a.lat, a.lng)) ?? squareAround(a.lat, a.lng);
+      const shared = {
+        id: a.id,
+        color: STATUS_COLOR[a.status],
+        // `unknown` is drawn lighter than `no_answer`: same colour, different weight, so
+        // "never contacted" and "knocked, nobody home" are not the same mark.
+        fillOpacity: a.status === 'unknown' ? 0.45 : 0.85,
+        number: houseNumber(a.address),
+      };
+      return [
+        {
+          type: 'Feature',
+          geometry: { type: 'Polygon', coordinates: [ring] },
+          properties: shared,
+        },
+        // The tap target and the roof label hang off the centroid, not the outline.
+        {
+          type: 'Feature',
+          geometry: { type: 'Point', coordinates: [a.lng, a.lat] },
+          properties: shared,
+        },
+      ] satisfies GeoJSON.Feature[];
+    }),
+  });
+}
+
+/** The ring around whichever house the sheet is about. One feature, cheap to redraw. */
+function paintSelection(
+  map: MlMap,
+  households: AddressState[],
+  selectedId: string | null,
+  outlines: Map<string, [number, number][]> | null,
+): void {
+  const source = map.getSource('selected') as maplibregl.GeoJSONSource | undefined;
+  if (!source) return;
+  const house = selectedId ? households.find((a) => a.id === selectedId) : undefined;
+  source.setData(
+    house
+      ? {
+          type: 'Feature',
+          properties: {},
+          geometry: {
+            type: 'Polygon',
+            coordinates: [outlines?.get(siteKey(house.lat, house.lng)) ?? squareAround(house.lat, house.lng)],
+          },
+        }
+      : emptyCollection(),
+  );
+}
+
+/** The officer: dot, accuracy, heading, range ring, and the walk they are following. */
+function paintOfficer(map: MlMap, position: OfficerPosition | null, route: LatLng[]): void {
   const walk = map.getSource('walk') as maplibregl.GeoJSONSource | undefined;
   walk?.setData(
     route.length > 1
@@ -507,11 +616,13 @@ function paint(
   const officer = map.getSource('officer') as maplibregl.GeoJSONSource | undefined;
   const accuracy = map.getSource('accuracy') as maplibregl.GeoJSONSource | undefined;
   const cone = map.getSource('cone') as maplibregl.GeoJSONSource | undefined;
+  const range = map.getSource('range') as maplibregl.GeoJSONSource | undefined;
 
   if (!position) {
     officer?.setData(emptyCollection());
     accuracy?.setData(emptyCollection());
     cone?.setData(emptyCollection());
+    range?.setData(emptyCollection());
     return;
   }
 
@@ -519,6 +630,15 @@ function paint(
     type: 'Feature',
     properties: {},
     geometry: { type: 'Point', coordinates: [position.lng, position.lat] },
+  });
+
+  range?.setData({
+    type: 'Feature',
+    properties: {},
+    geometry: {
+      type: 'Polygon',
+      coordinates: [circlePolygon(position.lat, position.lng, NEARBY_RADIUS_M)],
+    },
   });
 
   // Only a real fix has a radius to show. A circle under the simulated dot would be a claim
@@ -549,3 +669,4 @@ function paint(
       : emptyCollection(),
   );
 }
+

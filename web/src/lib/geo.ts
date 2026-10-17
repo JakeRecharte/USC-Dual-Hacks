@@ -22,18 +22,22 @@ export function pointInPolygon([lat, lng]: LatLng, polygon: LatLng[]): boolean {
 }
 
 /**
- * How far an officer can reasonably be from a door and still be *at* it. 150 feet is about
- * the depth of two lots on these streets, so the officer map draws the houses either side
- * of the one they are standing in front of and nothing from the next block.
+ * How far an officer can reasonably be from a door and still count as working it. About a
+ * block in each direction on these streets, which is the span an officer actually covers
+ * before moving on.
+ *
+ * It is a count and a ring on the officer's map, not a filter: every tracked household is
+ * drawn whatever this says. Widening it changes what the header totals, never what is on
+ * screen or what can be tapped.
  */
-export const NEARBY_RADIUS_FT = 150;
+export const NEARBY_RADIUS_FT = 300;
 export const NEARBY_RADIUS_M = NEARBY_RADIUS_FT * 0.3048;
 
 /**
  * Metres between two points, equirectangular: the latitude difference is scaled by cos(lat)
- * and the result is a flat Pythagorean distance. Over 150 feet this is within a millimetre
- * of the haversine distance, and it is a third of the trig, which matters when it runs over
- * two thousand households on every GPS tick.
+ * and the result is a flat Pythagorean distance. At this scale it is within centimetres of
+ * the haversine distance, and it is a third of the trig, which matters when it runs over
+ * eight thousand households on every GPS tick.
  */
 export function distanceMetres([latA, lngA]: LatLng, [latB, lngB]: LatLng): number {
   const mPerDegLat = 111_320;
@@ -97,4 +101,19 @@ export function nearest<T extends Located>(
     .map((item) => ({ item, metres: distanceMetres(origin, [item.lat, item.lng]) }))
     .sort((a, b) => a.metres - b.metres)
     .slice(0, count);
+}
+
+/**
+ * Move a point by a distance in metres, north and east. The inverse of `distanceMetres`,
+ * and the step the keyboard-driven officer takes each frame.
+ *
+ * Longitude is scaled by the latitude midway through the step rather than the starting one,
+ * so a long run of small steps does not accumulate drift.
+ */
+export function offsetMetres([lat, lng]: LatLng, northM: number, eastM: number): LatLng {
+  const mPerDegLat = 111_320;
+  const nextLat = lat + northM / mPerDegLat;
+  const midLat = ((lat + nextLat) / 2) * (Math.PI / 180);
+  const cosLat = Math.max(Math.cos(midLat), 1e-6);
+  return [nextLat, lng + eastM / (mPerDegLat * cosLat)];
 }

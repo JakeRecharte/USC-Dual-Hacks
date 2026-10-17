@@ -7,6 +7,7 @@ import {
   NEARBY_RADIUS_M,
   distanceMetres,
   nearest,
+  offsetMetres,
   pointInPolygon,
   within,
 } from '../src/lib/geo.ts';
@@ -52,7 +53,7 @@ describe('distanceMetres', () => {
     for (const [n, e] of [[45, 0], [0, 45], [32, 32], [-20, 40]] as const) {
       const b = offset(ORIGIN, n, e);
       // The two differ by about 0.1%, because 111,320 m/deg is the WGS84 equatorial figure
-      // and this haversine uses the mean radius. Over 150 ft that is five centimetres —
+      // and this haversine uses the mean radius. Over these distances that is centimetres —
       // two orders of magnitude inside a good phone fix, so the cheap formula is the right
       // one here. Asserted as a ratio so the bound holds wherever the officer is standing.
       const ratio = distanceMetres(ORIGIN, b) / haversine(ORIGIN, b);
@@ -63,9 +64,9 @@ describe('distanceMetres', () => {
 });
 
 describe('NEARBY_RADIUS', () => {
-  it('is 150 feet in metres', () => {
-    assert.equal(NEARBY_RADIUS_FT, 150);
-    assert.ok(Math.abs(NEARBY_RADIUS_M - 45.72) < 1e-9);
+  it('is 300 feet in metres', () => {
+    assert.equal(NEARBY_RADIUS_FT, 300);
+    assert.ok(Math.abs(NEARBY_RADIUS_M - 91.44) < 1e-9);
   });
 });
 
@@ -82,7 +83,7 @@ describe('within', () => {
   });
 
   it('cuts off at the radius, not somewhere near it', () => {
-    // A metre either side of the threshold. Exactly 45.72 m is a floating-point coin flip
+    // A metre either side of the threshold. Landing exactly on it is a floating-point coin flip
     // and no GPS fix ever lands there, so the boundary is asserted where it can be.
     assert.equal(within([house('just in', NEARBY_RADIUS_M - 1, 0)], ORIGIN).length, 1);
     assert.equal(within([house('just out', NEARBY_RADIUS_M + 1, 0)], ORIGIN).length, 0);
@@ -95,10 +96,15 @@ describe('within', () => {
   });
 
   it('rejects by bounding box without mis-dropping a diagonal neighbour', () => {
-    // 32 m north and 32 m east is 45.25 m away: inside the radius, and inside the box.
-    assert.equal(within([house('diag', 32, 32)], ORIGIN).length, 1);
-    // 40 m each way is 56.6 m: still inside the box, so only the distance can reject it.
-    assert.equal(within([house('corner', 40, 40)], ORIGIN).length, 0);
+    // Expressed as fractions of the radius, so changing the radius cannot quietly turn this
+    // into a test of nothing. The box is one radius on each axis, so a point inside the box
+    // but outside the circle can only be rejected by the distance check — which is the
+    // thing being tested.
+    const r = NEARBY_RADIUS_M;
+    // 0.7r each way is 0.99r from the origin: inside the circle and inside the box.
+    assert.equal(within([house('diagonal, inside', r * 0.7, r * 0.7)], ORIGIN).length, 1);
+    // 0.9r each way is 1.27r: inside the box, outside the circle.
+    assert.equal(within([house('diagonal, outside', r * 0.9, r * 0.9)], ORIGIN).length, 0);
   });
 
   it('is empty rather than throwing when nothing is in range', () => {
@@ -132,5 +138,40 @@ describe('pointInPolygon with the perimeter', () => {
   it('places the demo block inside and downtown outside', () => {
     assert.equal(pointInPolygon(ORIGIN, PERIMETER), true);
     assert.equal(pointInPolygon([34.0522, -118.2437], PERIMETER), false);
+  });
+});
+
+describe('offsetMetres', () => {
+  it('moves exactly as far as it says, in the direction it says', () => {
+    for (const [n, e] of [[10, 0], [0, 10], [-25, 0], [0, -25], [30, 40]] as const) {
+      const moved = offsetMetres(ORIGIN, n, e);
+      const expected = Math.hypot(n, e);
+      assert.ok(
+        Math.abs(distanceMetres(ORIGIN, moved) - expected) < 0.01,
+        `${n}N ${e}E measured ${distanceMetres(ORIGIN, moved)}`,
+      );
+    }
+  });
+
+  it('puts north to the north and east to the east', () => {
+    const [northLat, northLng] = offsetMetres(ORIGIN, 50, 0);
+    assert.ok(northLat > ORIGIN[0]);
+    assert.ok(Math.abs(northLng - ORIGIN[1]) < 1e-12);
+    const [eastLat, eastLng] = offsetMetres(ORIGIN, 0, 50);
+    assert.ok(eastLng > ORIGIN[1]);
+    assert.ok(Math.abs(eastLat - ORIGIN[0]) < 1e-12);
+  });
+
+  it('does not drift when the same step is taken many times', () => {
+    // 600 frames of a 0.1 m step is 60 m, the length of a block at walking pace.
+    let at = ORIGIN;
+    for (let i = 0; i < 600; i += 1) at = offsetMetres(at, 0.1, 0);
+    assert.ok(Math.abs(distanceMetres(ORIGIN, at) - 60) < 0.05, `drifted to ${distanceMetres(ORIGIN, at)}`);
+  });
+
+  it('is reversible', () => {
+    const there = offsetMetres(ORIGIN, 37, -21);
+    const back = offsetMetres(there, -37, 21);
+    assert.ok(distanceMetres(ORIGIN, back) < 0.01);
   });
 });
