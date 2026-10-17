@@ -155,7 +155,7 @@
     "description": "Call immediately if anyone is injured, trapped, or in immediate danger, or the caller asks for a person. Then call transfer_to_human.",
     "url": "{{PUBLIC_URL}}/fn/request_human",
     "speak_during_execution": false,
-    "speak_after_execution": false,
+    "speak_after_execution": true,
     "timeout_ms": 3000,
     "parameters": {
       "type": "object",

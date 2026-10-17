@@ -34,6 +34,7 @@ A wrong name gets no status at all: the looting safeguard.
     npm run simulate                 # all six cases
     npm run simulate -- refused      # one case
     npm test
+    npm run eval-agent               # 8 scripted callers through the agent's real LLM (Retell playground)
 
 Fill in `server/.env` (copied from `.env.example`). `RETELL_API_KEY` signs simulated
 requests and verifies `x-retell-signature` on real ones.
@@ -64,7 +65,7 @@ The agent config lives in `retell/`, not the dashboard:
 
     npm run setup-retell -- --url https://usc-dual-hacks-production.up.railway.app
 
-Updates **Line Intake** (Claude 5.5 Haiku, multilingual, 5 min max, 20s silence cutoff),
+Updates **Line Intake** (GPT 5.6 Terra, picked by `npm run eval-agent`; multilingual, 5 min max, 20s silence cutoff),
 points its webhook and tools at the URL, and binds it to the number with outbound
 disabled. **Re-run it whenever the prompt changes.** Set `DISPATCHER_NUMBER` first or
 `human_now` / `priority_queue` calls have nowhere to transfer.

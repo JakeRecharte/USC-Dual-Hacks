@@ -19,7 +19,9 @@ const retell = new Retell({ apiKey: config.retellApiKey });
 
 const INBOUND_NAME = 'Line Intake';
 const VOICE = process.env.RETELL_VOICE_ID || '11labs-Marissa';
-const MODEL = process.env.RETELL_MODEL || 'claude-5.5-haiku';
+// Chosen by scripts/eval-agent.js, Sat 11:50: gpt-5.6-terra 16/16 with no narration;
+// claude-5.5-haiku 3/8 (narrated its reasoning aloud on 5 of 8); claude-5.5-sonnet 7/8 at ~20x the cost.
+const MODEL = process.env.RETELL_MODEL || 'gpt-5.6-terra';
 const DISPATCHER = process.env.DISPATCHER_NUMBER || '';
 
 async function publicUrl() {
