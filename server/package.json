@@ -19,5 +19,8 @@
     "fastify": "^5.12.7",
     "retell-sdk": "^6.2.7"
   },
-  "private": true
+  "private": true,
+  "engines": {
+    "node": ">=20"
+  }
 }
