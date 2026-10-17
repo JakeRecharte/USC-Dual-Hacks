@@ -153,3 +153,24 @@ Until Supabase Realtime is on:
 1. P2: are the functions Postgres RPCs (`supabase.rpc('lookup_address', …)`) or Edge Functions? The server can call either.
 2. P2: is 120 min the right "recent" window for a cleared status?
 3. P4: is the SSE feed enough until Realtime is on, or do you want to read Supabase directly from the start?
+
+## 6. `calls` is the live record of every phone call (for the board, via Supabase Realtime)
+
+From P1, Sat 12:00. After `docs/sql/calls_retell.sql`, the board can read everything about calls
+from `public.calls` (Realtime on, readable with the board's minted token) instead of the
+telephony server's `/events` feed. One row per Retell `call_id`, upserted as the call happens:
+
+| Moment | Columns written | Notes |
+|---|---|---|
+| Call starts | `status='in_progress'`, `started_at`, `from_number`, `direction`, `simulated` | `routing` is **null** until routed: show "call in progress" |
+| `lookup_address` | `address`, `subject_name`, `address_id`, `lookup_found`, `lookup_status`, `name_match`, `inside_perimeter` | `lookup_status` is null when the caller didn't name the resident |
+| During the call | `caller_state` (only worsens), `distress_score` (handoff at 3), `transcript` (≤ every 4 s) | |
+| Emergency / distress heard live | `bypass=true`, `bypass_reason`, `routing='human_now'`, `severity=5` | |
+| `log_call` | `routing`, `severity`, `reason`, `mode`, `caller_update`, `report_written`, … | routing/severity **only move up** |
+| Transfer | `transfer_status`: `ringing` → `connected` or `failed` | failed also sets `routing='callback_queue'` |
+| Call ends | `status='ended'`, `ended_at`, `duration_s`, `disconnection_reason`, full `transcript` | unrouted hang-up → `routing='abandoned_callback'` |
+| Retell analysis (~5 s later) | `summary`, `user_sentiment`, `recording_url`, `latency_ms` | |
+
+Queue order: `callback_queue` > `human_now` > `priority_queue` > `abandoned_callback` >
+`scheduled_followup` / `answered_by_agent`; in-progress (null routing) wherever the board likes.
+Rows with `simulated=true` came from the simulator or the eval harness, not a real phone.

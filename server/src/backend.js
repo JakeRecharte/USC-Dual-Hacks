@@ -278,18 +278,52 @@ function upsertRow(callId, patch, now) {
   return row;
 }
 
-// Mirror the row into Supabase's `calls` table (docs/sql/calls.sql) for the board and so a
-// redeploy loses nothing. Fire-and-forget: the caller never waits on the database.
-const CALL_COLUMNS = ['call_id', 'mode', 'address', 'address_id', 'subject_name', 'from_number', 'with_them_now',
+// Mirror the row into Supabase's `calls` table (docs/sql/calls.sql + calls_retell.sql) for the
+// board and so a redeploy loses nothing. Fire-and-forget: the caller never waits on the database.
+const BASE_COLUMNS = ['call_id', 'mode', 'address', 'address_id', 'subject_name', 'from_number', 'with_them_now',
   'emergency', 'caller_update', 'last_contact_hours', 'vulnerability', 'red_flags', 'caller_state', 'prior_callers',
   'routing', 'severity', 'reason', 'simulated', 'created_at', 'updated_at'];
+const RETELL_COLUMNS = ['status', 'direction', 'started_at', 'ended_at', 'duration_s', 'disconnection_reason',
+  'transfer_status', 'bypass', 'bypass_reason', 'distress_score', 'lookup_found', 'lookup_status', 'name_match',
+  'inside_perimeter', 'report_written', 'transcript', 'summary', 'user_sentiment', 'recording_url', 'latency_ms'];
+// Until calls_retell.sql has run, write only the original columns rather than failing every write.
+// Re-checked every minute, so running the migration takes effect without a redeploy.
+let retellColumns = true;
+let retellCheckedAt = 0;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function rowForDb(row, columns) {
+  const out = Object.fromEntries(columns.filter((c) => row[c] !== undefined).map((c) => [c, row[c]]));
+  if (out.address_id && !UUID.test(out.address_id)) out.address_id = null;
+  if (!out.severity) delete out.severity; // 1-5 in the table; an unrouted call has none yet
+  return out;
+}
+
 function persist(row) {
   if (!db) return;
-  const out = Object.fromEntries(CALL_COLUMNS.filter((c) => row[c] !== undefined).map((c) => [c, row[c]]));
-  if (out.address_id && !UUID.test(out.address_id)) out.address_id = null;
-  db.from('calls').upsert(out, { onConflict: 'call_id' }).then(({ error }) => { if (error) dbFailed('calls upsert', error); },
-    (err) => dbFailed('calls upsert', err));
+  if (!retellColumns && Date.now() - retellCheckedAt > 60_000) retellColumns = true;
+  // Old schema has routing NOT NULL: an in-progress call waits until it's routed.
+  if (!retellColumns && row.routing == null) return;
+  const write = () => db.from('calls').upsert(rowForDb(row, retellColumns ? [...BASE_COLUMNS, ...RETELL_COLUMNS] : BASE_COLUMNS), { onConflict: 'call_id' });
+  write().then(({ error }) => {
+    if (!error) return;
+    if (retellColumns && (error.code === 'PGRST204' || /column/i.test(error.message))) {
+      retellColumns = false;
+      retellCheckedAt = Date.now();
+      dbFailed('calls upsert', `${error.message}: run docs/sql/calls_retell.sql; writing base columns until then`);
+      // Rows still in progress aren't written on the old schema (routing was not null there).
+      if (row.routing != null) write().then(({ error: e }) => e && dbFailed('calls upsert', e));
+      return;
+    }
+    dbFailed('calls upsert', error);
+  }, (err) => dbFailed('calls upsert', err));
+}
+
+// Any part of a call's row, as it happens (call started, lookup, transcript, transfer, analysis).
+// Routing and severity still only move up (upsertRow).
+export function patchCall(callId, patch, now = Date.now()) {
+  if (!callId) return null;
+  return upsertRow(callId, patch, now);
 }
 
 // How many *other* people have already called about this address. Repeat callers about one

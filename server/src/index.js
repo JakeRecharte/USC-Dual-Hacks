@@ -54,12 +54,14 @@ const argsOf = (body) => {
 // Caller's emotional state across the call. Only ever moves up: a caller who was
 // panicked a minute ago is not "calm" because they caught their breath.
 const STATES = ['calm', 'worried', 'distressed', 'panicked'];
+const TRANSCRIPT_EVERY_MS = 4000;
 function noteCallerState(callId, state, source) {
   if (!STATES.includes(state)) return sessions.get(callId)?.caller_state || null;
   const s = sessions.get(callId) || sessions.upsert(callId, {});
   const worst = STATES.indexOf(state) > STATES.indexOf(s.caller_state ?? 'calm') ? state : (s.caller_state || state);
   if (worst !== s.caller_state) {
     sessions.upsert(callId, { caller_state: worst });
+    backend.patchCall(callId, { caller_state: worst });
     sessions.bus.emit('emotion', { call_id: callId, caller_state: worst, source, distress_score: s.distress_score ?? 0, now: Date.now() });
   }
   return worst;
@@ -76,6 +78,11 @@ app.post('/fn/lookup_address', { preHandler: verifyRetell }, async (req, reply) 
 
   setImmediate(() => {
     sessions.upsert(call.call_id, { address: args.address, subject_name: args.subject_name, lookup });
+    backend.patchCall(call.call_id, {
+      address: args.address, subject_name: args.subject_name, address_id: lookup.address_id,
+      lookup_found: lookup.found, lookup_status: lookup.status, name_match: lookup.name_match,
+      inside_perimeter: lookup.inside_perimeter, from_number: call.from_number, simulated: Boolean(call.simulated),
+    });
     noteCallerState(call.call_id, args.caller_state, 'agent');
     sessions.bus.emit('lookup', { call_id: call.call_id, address: args.address, subject_name: args.subject_name, ...lookup, now });
     req.log.info({ call_id: call.call_id, address: args.address, found: lookup.found, name_match: lookup.name_match, status: lookup.status }, 'lookup');
@@ -130,6 +137,8 @@ app.post('/fn/request_human', { preHandler: verifyRetell }, async (req, reply) =
 
   setImmediate(() => {
     sessions.upsert(call.call_id, { routing: 'human_now', bypass_reason: args.reason });
+    backend.patchCall(call.call_id, { bypass: true, bypass_reason: args.reason, routing: 'human_now', severity: 5,
+      reason: `agent requested a person: ${args.reason}`, from_number: call.from_number, simulated: Boolean(call.simulated) });
     sessions.bus.emit('bypass', { call_id: call.call_id, from_number: call.from_number, kind: 'agent', reasons: [args.reason].filter(Boolean), now: Date.now() });
     req.log.warn({ call_id: call.call_id, reason: args.reason }, 'BYPASS requested');
   });
@@ -159,14 +168,22 @@ app.post('/webhook/retell', { preHandler: verifyRetell }, async (req, reply) => 
         direction: call.direction, from_number: call.from_number, to_number: call.to_number,
         started_at: call.start_timestamp || Date.now(),
       });
+      backend.patchCall(call.call_id, { status: 'in_progress', direction: call.direction, from_number: call.from_number,
+        started_at: new Date(call.start_timestamp || Date.now()).toISOString(), simulated: Boolean(call.simulated) });
     } else if (event === 'transcript_updated') {
       const s = sessions.upsert(call.call_id, { transcript: call.transcript });
       const distress = scoreDistress(call);
       if (distress.score !== (s.distress_score ?? 0)) {
         // Gauge for the board: how distressed the caller's words read, live.
         sessions.upsert(call.call_id, { distress_score: distress.score });
+        backend.patchCall(call.call_id, { distress_score: distress.score });
         sessions.bus.emit('emotion', { call_id: call.call_id, caller_state: s.caller_state || null, source: 'words',
           distress_score: distress.score, reasons: distress.reasons, now: Date.now() });
+      }
+      // Live transcript on the row, at most every few seconds (this event fires per utterance chunk).
+      if (Date.now() - (s.transcript_saved_at ?? 0) > TRANSCRIPT_EVERY_MS) {
+        sessions.upsert(call.call_id, { transcript_saved_at: Date.now() });
+        backend.patchCall(call.call_id, { transcript: call.transcript });
       }
       if (s.bypass_reason) return; // already escalated once; don't nag the agent
 
@@ -176,6 +193,8 @@ app.post('/webhook/retell', { preHandler: verifyRetell }, async (req, reply) => 
       const kind = phrase ? 'emergency' : 'distress';
       const reasons = phrase ? [`said "${phrase}"`] : distress.reasons;
       sessions.upsert(call.call_id, { routing: 'human_now', bypass_reason: `${kind}: ${reasons.join('; ')}` });
+      backend.patchCall(call.call_id, { bypass: true, bypass_reason: `${kind}: ${reasons.join('; ')}`, routing: 'human_now',
+        severity: 5, reason: `${kind} heard live: ${reasons.join('; ')}` });
       sessions.bus.emit('bypass', { call_id: call.call_id, from_number: call.from_number, kind, reasons, now: Date.now() });
       req.log.warn({ call_id: call.call_id, kind, reasons }, 'BYPASS from live transcript');
       handoff(call, reasons, req.log);
@@ -185,7 +204,11 @@ app.post('/webhook/retell', { preHandler: verifyRetell }, async (req, reply) => 
         ended_at: call.end_timestamp || Date.now(),
         transcript: call.transcript, disconnection_reason: call.disconnection_reason,
       });
-      // Hung up before routing, or transferred on the emergency path: still gets a row.
+      const endedAt = call.end_timestamp || Date.now();
+      backend.patchCall(call.call_id, { status: 'ended', ended_at: new Date(endedAt).toISOString(),
+        duration_s: call.start_timestamp ? Math.round((endedAt - call.start_timestamp) / 1000) : null,
+        disconnection_reason: call.disconnection_reason ?? null, transcript: call.transcript ?? ended.transcript ?? null });
+      // Hung up before routing, or transferred on the emergency path: still gets a routing.
       if (!ended.logged) {
         const row = backend.logUnrouted(ended, call, Date.now());
         sessions.upsert(call.call_id, { routing: row.routing, logged: true });
@@ -194,18 +217,29 @@ app.post('/webhook/retell', { preHandler: verifyRetell }, async (req, reply) => 
       }
     } else if (event === 'transfer_bridged') {
       sessions.upsert(call.call_id, { transfer: 'connected' });
+      backend.patchCall(call.call_id, { transfer_status: 'connected' });
     } else if (event === 'transfer_cancelled' || event === 'transfer_ended') {
       const s = sessions.get(call.call_id);
       if (s?.transfer !== 'connected') {
         const detail = call.transfer_status || call.disconnection_reason || event;
         const row = backend.logTransferFailed(call.call_id, call.from_number ?? s?.from_number, detail, Date.now());
         sessions.upsert(call.call_id, { transfer: 'failed', routing: row.routing, logged: true });
+        backend.patchCall(call.call_id, { transfer_status: 'failed' });
         sessions.bus.emit('call_logged', { ...row, simulated: Boolean(call.simulated) });
         sessions.bus.emit('transfer_failed', { call_id: call.call_id, detail, now: Date.now() });
         req.log.error({ call_id: call.call_id, detail }, 'TRANSFER FAILED: caller needs a callback');
       }
     } else if (event === 'transfer_started') {
       sessions.upsert(call.call_id, { transfer: 'ringing' });
+      backend.patchCall(call.call_id, { transfer_status: 'ringing' });
+    } else if (event === 'call_analyzed') {
+      // Retell's post-call analysis, a few seconds after the call ends.
+      const a = call.call_analysis || {};
+      backend.patchCall(call.call_id, {
+        summary: a.call_summary ?? null, user_sentiment: a.user_sentiment ?? null,
+        recording_url: call.recording_url ?? null,
+        latency_ms: call.latency?.e2e?.p50 != null ? Math.round(call.latency.e2e.p50) : null,
+      });
     }
     sessions.bus.emit(event, call);
     req.log.info({ event, call_id: call.call_id }, 'lifecycle');
