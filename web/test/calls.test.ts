@@ -1,7 +1,7 @@
 // The queue merge rules: routing and severity only move up, except over a placeholder.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mergeCall } from '../src/lib/calls.ts';
+import { callFromDb, mergeCall } from '../src/lib/calls.ts';
 import { ROUTING_LABEL, ROUTING_RANK } from '../src/lib/types.ts';
 import type { CallRow } from '../src/lib/types.ts';
 
@@ -37,4 +37,15 @@ test('a bypass arriving before the lookup is not undone by the placeholder', () 
   const merged = mergeCall(bypass, row({ provisional: true }));
   assert.equal(merged.routing, 'human_now');
   assert.equal(merged.bypass, true);
+});
+
+test('a call row from Supabase: unrouted reads as in progress; a late placeholder never downgrades', () => {
+  const started = callFromDb({ call_id: 'c1', created_at: '2026-10-18T02:00:00Z', routing: null });
+  assert.equal(started.provisional, true);
+  assert.equal(started.reason, 'call in progress');
+  const routed = callFromDb({ call_id: 'c1', created_at: '2026-10-18T02:00:00Z', routing: 'answered_by_agent', severity: 2, reason: 'caller report: out', address: '468 Northfield St' });
+  assert.equal(mergeCall(started, routed).routing, 'answered_by_agent');
+  const late = mergeCall(routed, started);
+  assert.equal(late.routing, 'answered_by_agent');
+  assert.equal(late.reason, 'caller report: out');
 });

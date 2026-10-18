@@ -477,3 +477,27 @@ test('a house we do not have is placed at the centre of its street', () => {
   assert.ok(Math.abs(g.lat - 34.05) < 1e-9 && Math.abs(g.lng + 118.53) < 1e-9);
   assert.equal(streetGeo(sameStreet(rows, '9 Nowhere Ln')), null);
 });
+
+// Real calls, 7:07 and 7:15 PM: the agent sent reported_status "staying" for "the evacuation
+// has been cleared", and "with them now" sent good news to a person and turned the house red.
+test('report: the caller\'s words override a wrong reported_status', async () => {
+  const { reconcileReport, reportIntent } = await import('../src/report-intent.js');
+  const r = reconcileReport({ reported_status: 'staying', reported_by: 'relative_or_friend',
+    caller_update: 'The evacuation has been cleared for Priscilla Fisher.' });
+  assert.equal(r.reported_status, 'out');
+  assert.equal(reconcileReport({ reported_status: null, caller_update: null }, ['she left this morning, she is at her sister\'s']).reported_status, 'out');
+  assert.equal(reconcileReport({ reported_status: 'out', caller_update: 'he is staying to protect the house' }).reported_status, 'staying');
+  assert.equal(reconcileReport({ reported_status: null, caller_update: null }, ['I am out, I am at my sister\'s house']).reported_by, 'resident');
+  assert.equal(reportIntent("I haven't heard from her"), null);
+  assert.equal(reportIntent("she's at her house"), null);
+});
+
+test('report: "they\'re out" is answered by the agent, with them or not; "staying" still goes to a person', () => {
+  const lookup = { found: true, name_match: true, status: 'no_answer', inside_perimeter: true, recorded_at: new Date(now - 30 * 60000).toISOString() };
+  const base = { mode: 'wildfire', reported_by: 'relative_or_friend', caller_state: 'calm' };
+  assert.equal(route({ ...base, with_them_now: true, reported_status: 'out' }, lookup, now).routing, 'answered_by_agent');
+  assert.equal(route({ ...base, with_them_now: false, reported_status: 'out' }, lookup, now).routing, 'answered_by_agent');
+  assert.equal(route({ ...base, with_them_now: false, reported_status: 'staying' }, lookup, now).routing, 'priority_queue');
+  assert.equal(route({ ...base, with_them_now: true, reported_status: 'out', emergency: true }, lookup, now).routing, 'human_now');
+  assert.equal(route({ ...base, with_them_now: true, reported_status: 'out', caller_state: 'panicked' }, lookup, now).routing, 'human_now');
+});

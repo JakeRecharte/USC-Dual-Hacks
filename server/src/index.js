@@ -8,7 +8,8 @@ import * as sessions from './sessions.js';
 import * as backend from './backend.js';
 import { dbHealth } from './db.js';
 import { FRESH_MIN } from './routing.js';
-import { NAME_GIVE_UP, sayForLookup, sayForRouting, sayResidentOut } from './speech.js';
+import { NAME_GIVE_UP, sayForLookup, sayForRouting, sayRelativeOut, sayResidentOut } from './speech.js';
+import { callerLines, reconcileReport } from './report-intent.js';
 
 const app = Fastify({ logger: { level: 'info' } });
 const retell = config.retellApiKey ? new Retell({ apiKey: config.retellApiKey }) : null;
@@ -99,6 +100,13 @@ app.post('/fn/log_call', { preHandler: verifyRetell }, async (req, reply) => {
   const now = Date.now();
   const session = sessions.get(call.call_id);
   const callerState = noteCallerState(call.call_id, args.caller_state, 'agent');
+  // The agent's report fields, corrected by the caller's own words (report-intent.js).
+  const { corrected, ...reported } = reconcileReport({
+    reported_status: ['staying', 'out'].includes(args.reported_status) ? args.reported_status : null,
+    reported_by: args.reported_by === 'resident' ? 'resident' : args.reported_by === 'relative_or_friend' ? 'relative_or_friend' : null,
+    caller_update: args.caller_update || null,
+  }, callerLines(session?.transcript));
+  if (corrected.length) req.log.warn({ call_id: call.call_id, corrected, caller_update: args.caller_update }, 'report corrected from caller words');
   const payload = {
     mode: args.mode === 'routine' ? 'routine' : 'wildfire',
     address: args.address,
@@ -108,8 +116,7 @@ app.post('/fn/log_call', { preHandler: verifyRetell }, async (req, reply) => {
     emergency: args.emergency === true || Boolean(session?.bypass_reason),
     emergency_reason: session?.bypass_reason || null,
     caller_update: args.caller_update || null,
-    reported_status: ['staying', 'out'].includes(args.reported_status) ? args.reported_status : null,
-    reported_by: args.reported_by === 'resident' ? 'resident' : args.reported_status ? 'relative_or_friend' : null,
+    ...reported,
     reported_minutes_ago: Number.isFinite(Number(args.reported_minutes_ago)) ? Number(args.reported_minutes_ago) : 0,
     last_contact_hours: args.last_contact_hours ?? null,
     vulnerability: args.vulnerability || {},
@@ -122,8 +129,9 @@ app.post('/fn/log_call', { preHandler: verifyRetell }, async (req, reply) => {
   const { row } = await backend.logCall(payload, now);
   const transfer = row.routing === 'human_now' || row.routing === 'priority_queue';
 
-  const say = row.routing === 'answered_by_agent' && payload.reported_by === 'resident' && payload.reported_status === 'out'
-    ? sayResidentOut(now) : sayForRouting[row.routing];
+  const say = row.report_written === 'self_out' ? sayResidentOut(now)
+    : row.report_written === 'in_transit' ? sayRelativeOut(payload.subject_name, now)
+      : sayForRouting[row.routing];
   reply.send({ routing: row.routing, severity: row.severity, reason: row.reason, transfer, say });
 
   setImmediate(() => {

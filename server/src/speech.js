@@ -55,6 +55,12 @@ export function sayForLookup(lookup, subjectName, now, freshMin) {
 }
 
 // The resident told us they're out: confirm it back with the time, nothing more.
+// A relative's "they got out": recorded, but not as a confirmed clear.
+export const sayRelativeOut = (subjectName, now) => {
+  const first = (subjectName || '').trim().split(/\s+/)[0] || 'they';
+  const t = when(new Date(now).toISOString(), now).replace(/^at /, '').replace(/, just now$/, '');
+  return `Thank you. I've noted that ${first} has left, as of ${t}. An officer will still confirm the house. Is there anything else?`;
+};
 export const sayResidentOut = (now) => `Thank you. I've recorded that you're out of the area, as of ${when(new Date(now).toISOString(), now).replace(/^at /, '').replace(/, just now$/, '')}.`;
 
 // Transfers say nothing here: the transfer tool itself says "Transferring you now."

@@ -22,6 +22,17 @@ export function worseState(
  */
 export function mergeCall(existing: CallRow, row: CallRow): CallRow {
   const real = existing.provisional && !row.provisional;
+  // And the reverse: a placeholder arriving late (Supabase and the server's feed race) never
+  // overrides a real routing.
+  if (row.provisional && !existing.provisional) {
+    return {
+      ...existing,
+      address: existing.address || row.address,
+      subject_name: existing.subject_name || row.subject_name,
+      caller_state: worseState(existing.caller_state, row.caller_state),
+      distress_score: Math.max(existing.distress_score ?? 0, row.distress_score ?? 0),
+    };
+  }
   return {
     ...existing,
     ...row,
@@ -35,5 +46,30 @@ export function mergeCall(existing: CallRow, row: CallRow): CallRow {
     reason: row.reason || existing.reason,
     provisional: Boolean(existing.provisional && row.provisional),
     created_at: existing.created_at,
+  };
+}
+
+/**
+ * A row of public.calls as the queue shows it. The server writes a row the moment a call
+ * starts, before any routing: that shows as "call in progress" until the routing lands.
+ */
+export function callFromDb(r: Record<string, unknown>): CallRow {
+  const routed = typeof r.routing === 'string' && r.routing.length > 0;
+  return {
+    id: String(r.call_id ?? r.id ?? ''),
+    call_id: String(r.call_id ?? r.id ?? ''),
+    mode: r.mode === 'routine' ? 'routine' : 'wildfire',
+    address: String(r.address ?? ''),
+    subject_name: String(r.subject_name ?? ''),
+    address_id: (r.address_id as string | null) ?? null,
+    routing: (routed ? r.routing : 'priority_queue') as CallRow['routing'],
+    severity: Number(r.severity) || 0,
+    reason: String(r.reason ?? (r.ended_at ? 'call ended before it was routed' : 'call in progress')),
+    created_at: String(r.created_at ?? new Date().toISOString()),
+    from_number: (r.from_number as string | null) ?? null,
+    bypass: Boolean(r.bypass),
+    provisional: !routed,
+    caller_state: (r.caller_state as CallRow['caller_state']) ?? null,
+    distress_score: Number(r.distress_score) || 0,
   };
 }
