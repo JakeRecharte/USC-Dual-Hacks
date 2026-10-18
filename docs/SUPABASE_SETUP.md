@@ -243,13 +243,13 @@ able to read nothing) and names the file to run for anything that fails. It roll
 so it is safe to run mid-demo.
 
 **When an urgent call goes away.** A house with an urgent call about it (`human_now`,
-`callback_queue`, or an emergency heard live) is red until an **officer's** check that is *newer
-than the call* finds it cleared or self-evacuated; then the normal rules apply (green, if the clear
-is under 120 minutes old). Deliberately not enough to close it: a phone report ("I've left"), a
-resident reply, an officer knock with no answer, or any check older than the call. A later urgent
-call turns it red again. The comparison is the check's `recorded_at` (when the officer stood at the
-door) against the call's `created_at`, so a tap queued offline and delivered late is judged by when
-it happened.
+`callback_queue`, or an emergency heard live) is red only until a **newer status** arrives for that
+house: an officer's check, a resident's reply, or a phone report. Then the normal rules apply
+(green if it is a clear under 120 minutes old, orange for no answer, yellow for evacuating). A later
+urgent call turns it red again. The comparison is the status's `recorded_at` (when the officer stood
+at the door) against the call's `created_at`, so a tap queued offline and delivered late is judged
+by when it happened. This is the rule in `docs/sql/house_colors_v2.sql`, which is also in
+`house_colors.sql`: either file installs it.
 
 **Greens expire.** Nothing writes a row when a clear turns 120 minutes old, so
 `expire_house_colors()` recolours those houses (to grey), and `house_colors.sql` schedules it every minute

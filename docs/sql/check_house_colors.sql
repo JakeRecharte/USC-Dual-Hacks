@@ -15,7 +15,7 @@
 --      turns the house red with an event that says grey -> red
 --   4. an officer tap recolours a house but raises no Retell event
 --   5. the signed-in dashboards can read the result, and anon (the public key) reads nothing
---   6. a newer officer check closes an urgent call out (red -> green), and a stored green whose
+--   6. a newer status closes an urgent call out (red -> green), and a stored green whose
 --      clear has gone stale is recoloured by expire_house_colors(), which pg_cron runs each minute
 
 -- seen: what the check observed (always shown). fix: what to do about it (shown on FAIL only).
@@ -176,7 +176,7 @@ begin
         insert into public.status_log (address_id, status, source, recorded_at)
           values (h, 'cleared', 'officer', now() + interval '1 second');
         select hs.color, hs.color_reason into col, why from public.houses hs where hs.id = h;
-        res := pg_temp.chk(res, 'an officer check NEWER than the urgent call turns the house GREEN', col = 'green',
+        res := pg_temp.chk(res, 'a status NEWER than the urgent call turns the house GREEN', col = 'green',
           'color is ' || coalesce(col, 'null') || ' (' || coalesce(why, 'no reason') || ')');
 
         -- The two in-between colours: an unanswered knock, then a report that they are leaving.

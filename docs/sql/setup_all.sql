@@ -8458,9 +8458,11 @@ notify pgrst, 'reload schema';
 --
 --   red    marked staying (refused), or a call about it needed a person now
 --          (routing human_now / callback_queue, or emergency/distress heard live).
---          An officer's check that is NEWER than that call and found the house cleared or
---          self-evacuated closes the call out. A phone report, a resident reply, an unanswered
---          knock or an older check does not: the urgent call stands.
+--          The urgent call stands only until a NEWER status arrives for the house (an officer's
+--          check, a resident's reply, a phone report): newer information wins, so a later "she
+--          got out" or "cleared" can recolour a house anyone once called about urgently.
+--          docs/sql/house_colors_v2.sql holds just this rule, for a project that already has the
+--          rest; running either file leaves the same rule installed.
 --   green  cleared or self-evacuated within the last 120 minutes
 --   orange an officer knocked and got no answer
 --   yellow reported leaving (evacuating), no follow-up yet
@@ -8513,12 +8515,8 @@ language sql stable set search_path = public as $$
     from public.calls c
     where c.address_id = p_house
       and (c.routing in ('human_now', 'callback_queue') or c.bypass)
-      -- closed out by a later officer check that reached a conclusion (see the rules above)
-      and not coalesce(
-        p_status in ('cleared', 'self_out')
-        and p_checked > c.created_at
-        and (select h.evacuation_status_source from public.houses h where h.id = p_house) = 'officer',
-        false)
+      -- only a call NEWER than the latest status counts: a later status closes it out
+      and c.created_at > coalesce(p_checked, '-infinity'::timestamptz)
     order by c.created_at desc limit 1
   )
   select
