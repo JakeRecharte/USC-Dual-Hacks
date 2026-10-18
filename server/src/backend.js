@@ -480,6 +480,7 @@ export const getCall = (callId) => calls.get(callId);
 // repeat-caller counts would include calls from before the reset.
 export function forgetAllCalls() {
   calls.clear();
+  fakeReports.clear();
   // reset-demo may have just replaced the households; re-read them on the next lookup.
   households = { at: 0, rows: null };
 }

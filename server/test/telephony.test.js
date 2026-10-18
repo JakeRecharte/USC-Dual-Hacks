@@ -5,7 +5,7 @@ if (process.env.SUPABASE_URL) throw new Error('tests must not run against Supaba
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { checkBypass, callerText } from '../src/bypass.js';
-import { lookupAddress, logCall, logUnrouted, logTransferFailed, getCall, addressKey, nameMatches, findHousehold, spokenNumber, sameStreet, streetGeo } from '../src/backend.js';
+import { forgetAllCalls, lookupAddress, logCall, logUnrouted, logTransferFailed, getCall, addressKey, nameMatches, findHousehold, spokenNumber, sameStreet, streetGeo } from '../src/backend.js';
 import { route, routineScore, FRESH_MIN } from '../src/routing.js';
 import { sayForLookup, sayForRouting } from '../src/speech.js';
 import { scoreDistress, handoffInstruction } from '../src/distress.js';
@@ -344,7 +344,8 @@ test('B8: a misheard street with the same sound and number finds the house', () 
 
 test('C: a resident saying "I am out" is recorded, unless the house is marked staying', () => {
   assert.equal(callReport({ reported_status: 'out', reported_by: 'resident' }, { address_id: 'x', status: 'unknown' }, now).status, 'self_out');
-  assert.ok(callReport({ reported_status: 'out', reported_by: 'resident' }, { address_id: 'x', status: 'refused' }, now).skip);
+  const left = callReport({ reported_status: 'out', reported_by: 'resident' }, { address_id: 'x', status: 'refused' }, now);
+  assert.equal(left.status, 'in_transit', 'a resident who was staying and left: evacuating until an officer confirms');
 });
 
 test('C: nothing is written for an address we do not have', () => {
@@ -372,13 +373,13 @@ test('C: resident out is answered and recorded; the next caller hears it with th
   assert.match(sayForLookup(next, 'Kevin Nguyen', now + 60000, FRESH_MIN), /^Kevin called in at .*, to say they were out of the area/);
 });
 
-test('C: resident says out but the house is marked staying: a person checks, record unchanged', async () => {
+test('C: resident who was staying calls to say they left: evacuating, agent answers, officer confirms', async () => {
   const { row } = await logCall({ ...base('rc3', '+13105550303'), address: '1515 Via de la Paz', subject_name: 'Harold Kim',
     reported_status: 'out', reported_by: 'resident' }, now);
-  assert.equal(row.routing, 'priority_queue');
-  assert.equal(row.report_written, null);
-  assert.match(row.reason, /not recorded/);
-  assert.equal((await lookupAddress({ address: '1515 Via de la Paz', subject_name: 'Harold Kim' }, now)).status, 'refused');
+  assert.equal(row.routing, 'answered_by_agent');
+  assert.equal(row.report_written, 'in_transit');
+  assert.equal((await lookupAddress({ address: '1515 Via de la Paz', subject_name: 'Harold Kim' }, now)).status, 'in_transit');
+  forgetAllCalls(); // put Harold back to "refused" for the tests below
 });
 
 // ── Real-call fixes (Retell call log, 10:25) ──

@@ -96,7 +96,7 @@ function routeOnFacts(call, lookup, now) {
   }
   if (call.reported_by === 'resident' && call.reported_status === 'out') {
     return status === 'refused'
-      ? { routing: 'priority_queue', severity: 4, reason: 'resident called to say out, but the house is marked staying', rule: 'resident_out_conflict' }
+      ? { routing: 'answered_by_agent', severity: 3, reason: 'resident says they left; house was marked staying, officer to confirm', rule: 'resident_out_conflict' }
       : { routing: 'answered_by_agent', severity: 1, reason: 'resident called: out of the area', rule: 'resident_out' };
   }
   // New information beats the record, but only a concrete report of where the person is.

@@ -4,7 +4,7 @@
 // A phone report is weaker than an officer at the door, so it can only raise concern:
 // - "he told me he's staying" (anyone)        → refused, onto the door-knock list
 // - "I'm still here" (the resident)           → refused (and log_call sends them to a person)
-// - "I'm out" (the resident)                  → self_out, unless the house is marked staying
+// - "I'm out" (the resident)                  → self_out; in_transit if the house was marked staying
 // - "she texted she's out" (relative/friend)  → in_transit ("Evacuating"), marked unverified.
 //   It shows on the map and keeps the house on the door-knock list: a second-hand "out" must
 //   never clear a house (pitch_v2.md: false or prank replies), but writing nothing left
@@ -35,7 +35,11 @@ export function callReport(call, current, now) {
       }
       return { ...base, status: 'in_transit', note: `phone report (${who}, unverified): ${call.caller_update || 'says they got out'}` };
     }
-    if (current.status === 'refused') return { skip: 'resident says out but the house is marked staying; a person checks' };
+    // They were staying and now say they left: the news the line exists for. Evacuating, not
+    // cleared, until an officer confirms, since the house was marked staying.
+    if (current.status === 'refused') {
+      return { ...base, status: 'in_transit', note: 'phone report (resident): says they left; house was marked staying, officer to confirm' };
+    }
     return { ...base, status: 'self_out', note: 'phone report (resident): out of the area' };
   }
   return { skip: `unknown reported_status: ${call.reported_status}` };
