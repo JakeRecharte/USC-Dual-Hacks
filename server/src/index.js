@@ -8,7 +8,7 @@ import * as sessions from './sessions.js';
 import * as backend from './backend.js';
 import { dbHealth } from './db.js';
 import { FRESH_MIN } from './routing.js';
-import { NAME_GIVE_UP, sayForLookup, sayForRouting, sayRelativeOut, sayResidentOut } from './speech.js';
+import { NAME_GIVE_UP, sayForLookup, sayForRouting, sayRelativeOut, sayResidentLeft, sayResidentOut } from './speech.js';
 import { callerLines, reconcileReport } from './report-intent.js';
 
 const app = Fastify({ logger: { level: 'info' } });
@@ -130,7 +130,8 @@ app.post('/fn/log_call', { preHandler: verifyRetell }, async (req, reply) => {
   const transfer = row.routing === 'human_now' || row.routing === 'priority_queue';
 
   const say = row.report_written === 'self_out' ? sayResidentOut(now)
-    : row.report_written === 'in_transit' ? sayRelativeOut(payload.subject_name, now)
+    : row.report_written === 'in_transit'
+      ? (payload.reported_by === 'resident' ? sayResidentLeft(now) : sayRelativeOut(payload.subject_name, now))
       : sayForRouting[row.routing];
   reply.send({ routing: row.routing, severity: row.severity, reason: row.reason, transfer, say });
 
