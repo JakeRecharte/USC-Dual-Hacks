@@ -68,7 +68,10 @@ if (!statuses.length || !households.length || bad.length || orphans.length || ba
 }
 
 // Non-destructive first (upsert households), destructive last, so a failure leaves data in place.
-check('upsert addresses', await db.from('addresses').upsert(households, { onConflict: 'id' }));
+// In batches: every row fires the houses trigger, and 12k in one statement hits the timeout.
+for (let i = 0; i < households.length; i += 1000) {
+  check('upsert addresses', await db.from('addresses').upsert(households.slice(i, i + 1000), { onConflict: 'id' }));
+}
 
 // Households no longer in the seed (P4 replaces it as the map grows) would show on the board as
 // strays. Remove them; their statuses cascade, calls keep the row and lose the link.
@@ -84,7 +87,9 @@ for (let i = 0; i < stray.length; i += 100) {
   check('remove stray households', await db.from('addresses').delete().in('id', stray.slice(i, i + 100)));
 }
 check('clear status_log', await db.from('status_log').delete().not('address_id', 'is', null));
-check('insert status_log', await db.from('status_log').insert(statuses));
+for (let i = 0; i < statuses.length; i += 1000) {
+  check('insert status_log', await db.from('status_log').insert(statuses.slice(i, i + 1000)));
+}
 if (!process.argv.includes('--keep-calls')) {
   check('clear calls', await db.from('calls').delete().not('call_id', 'is', null));
 }

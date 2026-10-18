@@ -247,16 +247,17 @@ async function writeReport(report, now) {
 // an officer's tap a few seconds ago is exactly what the caller is asking about.
 let households = { at: 0, rows: null };
 async function dbHouseholds(now) {
-  if (households.rows && now - households.at < 30_000) return households.rows;
-  // Supabase returns at most 1,000 rows per request; the seed has ~2,000. Page through all of
-  // them (a single read missed half the households, which then looked "not in our records").
-  const data = [];
-  for (let from = 0; ; from += 1000) {
-    const page = await db.from('addresses').select('id, address, lat, lng, resident_name').order('id').range(from, from + 999);
-    if (page.error) throw page.error;
-    data.push(...page.data);
-    if (page.data.length < 1000) break;
-  }
+  if (households.rows && now - households.at < 300_000) return households.rows;
+  // Supabase returns at most 1,000 rows per request; the seed has ~12,000. Read every page,
+  // in parallel so a cold cache doesn't hold the caller through a dozen round trips (a
+  // single read once missed most households, which then looked "not in our records").
+  const head = await db.from('addresses').select('id', { count: 'exact', head: true });
+  if (head.error) throw head.error;
+  const pages = await Promise.all(Array.from({ length: Math.ceil((head.count ?? 0) / 1000) + 1 }, (_, p) =>
+    db.from('addresses').select('id, address, lat, lng, resident_name').order('id').range(p * 1000, p * 1000 + 999)));
+  const failed = pages.find((page) => page.error);
+  if (failed) throw failed.error;
+  const data = pages.flatMap((page) => page.data);
   households = { at: now, rows: data.map((r) => ({ ...r, inside_perimeter: pointInPolygon([Number(r.lat), Number(r.lng)]) })) };
   return households.rows;
 }
@@ -446,6 +447,8 @@ export const getCall = (callId) => calls.get(callId);
 // repeat-caller counts would include calls from before the reset.
 export function forgetAllCalls() {
   calls.clear();
+  // reset-demo may have just replaced the households; re-read them on the next lookup.
+  households = { at: 0, rows: null };
 }
 
 // Retell's playground (scripts/eval-agent.js) sends every conversation as call_id "playground";

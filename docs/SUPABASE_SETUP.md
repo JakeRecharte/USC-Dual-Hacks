@@ -117,7 +117,8 @@ relative to `now()`, so the ages re-base each time.
 
 Run **`docs/seed.sql`**. It is generated from `web/src/lib/addresses.ts`, so the board, the
 demo script's pre-flight numbers and the voice agent's fake data all describe the same
-households — about 3,600 lines, too long to paste here.
+households — about 22,000 lines, too long to paste here. Regenerate it with
+`node --experimental-strip-types web/scripts/build-seed-sql.mjs`.
 
 ```bash
 psql "$SUPABASE_DB_URL" -f docs/seed.sql
@@ -127,12 +128,14 @@ Or paste it into the Supabase SQL editor. It begins with the two deletes, so re-
 resets the board between demo runs; the timestamps are relative to `now()`, so the ages
 re-base each time.
 
-After seeding, the dispatch board should read **1,108 unresolved of 1,998**, **83 refused**,
-**414 never contacted**, **202 stale clears**, with Rustic Canyon (`PAL-07`) worst at
-`183/229`. If it doesn't, the seed didn't take.
+After seeding, the dispatch board should read **7,136 unresolved of 12,396**, **549 refused**,
+**2,718 never contacted**, **1,187 stale clears**, with Rustic Canyon (`PAL-07`) first at
+`1083/1392`. If it doesn't, the seed didn't take.
 
-**Every household sits on a real building.** The coordinates are centroids of OpenStreetMap
-dwelling footprints inside the perimeter, and `web/public/buildings.json` carries all 8,103
+**Every household sits on a real building.** The coordinates are centroids of building footprints
+inside the perimeter: 8,103 from OpenStreetMap, plus 4,309 from Microsoft's ML footprints in
+the tracts OSM never mapped (the Alphabet Streets, the Tahiti/Aloha tract, Villa Woods;
+`web/scripts/add-ms-footprints.mjs`). `web/public/buildings.json` carries all 12,412
 outlines so the map can draw the actual shape of each house. Addresses and residents are
 invented — OSM has street addresses for only 25 buildings here — but the geography is not.
 
