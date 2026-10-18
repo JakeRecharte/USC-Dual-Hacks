@@ -6,22 +6,28 @@ breathe. **P4 drives the board. P1 makes the calls.**
 Two screens: a **laptop** on `/dispatch` (shared/projected) and a **phone** on `/officer`
 (held up to camera, or mirrored into a corner of the recording).
 
+> **The invented data this script was written against has been removed.** Every house now starts
+> grey (unknown) and there is no sample data, no **Reset demo data** button and no **Simulate
+> call**. The counts quoted below (1,108 unresolved, 83 refused, `183/229`, …) came from that
+> data and **no longer appear**; the beats need re-recording against records that are really
+> there. The tap-and-watch-it-change flow still works the same way.
+
 ---
 
 ## Pre-flight — do this before recording, every take
 
-1. `cd web && npm run dev`, or `npm run build && npm start`.
+1. `cd web && npm run dev`, or `npm run build && npm start`, with the four Supabase variables
+   **set** in `web/.env.local`. Check `/api/health` says `"mode":"supabase"`; if it says
+   `"memory"`, the app is not reading the database.
 2. Laptop: sign in at `/` as **dispatch**, code `5150`. Leave it on `/dispatch`.
 3. Phone: sign in as **officer**, code `1420`. It opens on whichever zone has the most doors
    left. **Tap over to PAL-06, Huntington Palisades** — that's where beat 2 is.
-4. Click **Reset demo data** in the dispatch header. Do this between every take.
-5. Confirm both feeds are green in the header: *Status feed live*, *Call feed live*. If the
-   call feed is not live, see the fallback at the bottom.
-6. Map on **Buildings**. Have the phone already scrolled to **640 Toyopa Dr**.
+4. To start a take clean, `npm run reset-demo` in `server/` (households only, every house grey).
+5. If the call queue shows nothing to attach to, the call feed is not configured; see the
+   fallback at the bottom.
+6. Have the phone already scrolled to **640 Toyopa Dr**.
 
-A clean reset shows **1,108 unresolved of 1,998**, **83 refused**, **414 never contacted**,
-**202 stale clears**, and the zone strip led by Rustic Canyon `PAL-07` at `183/229`. If those
-don't match, you didn't reset.
+A clean reset shows **1,998 houses, all grey, 0 refused**. If it doesn't, you didn't reset.
 
 ---
 
@@ -37,12 +43,10 @@ don't match, you didn't reset.
 Zoom in once: the dots resolve into individual houses, each one coloured by its status, with
 the grey ones around them the buildings nobody has a record for.
 
-Click **Zones**. Zone circles and the `183/229` labels come up.
+Point at the zone cards under the map, where the `183/229` counts are.
 
 > "Rustic Canyon — a hundred and eighty-three of two hundred and twenty-nine still
 > unanswered. Deep canyon, bad signal, nobody has worked it. That's where the next crew goes."
-
-Click back to **Buildings**.
 
 **Why it matters:** the colour change is the whole point. Say it now, because beat 2 shows it happening.
 
@@ -138,11 +142,11 @@ mail piling up.
 
 | If this breaks | Do this |
 |---|---|
-| **Call feed is not live** | **Simulate call** in the dispatch header has all four beats as canned rows that match the routing table. The map and officer flow are unaffected. Say "simulated" out loud if asked. |
+| **The call queue is empty / call feed not configured** | There is no canned fallback any more. The map and officer flow are unaffected; narrate the call beats over the officer flow, or place a real call. |
 | **The phone won't connect** | Open `/officer` in a second browser window on the laptop, narrow, beside the board. The split screen actually reads better on video. |
 | **A call drops mid-demo** | Keep going and narrate the board. The queue row is already there from the `lookup` event — it shows *"call in progress"* before routing lands. |
 | **The map won't load** | Basemap tiles come from OpenFreeMap and need the network. The perimeter, zones and households are drawn from local data and still render over a blank ground, so the demo survives it. Failing that, the door-knock list carries the same information as text. |
-| **Everything is wrong** | `POST /api/reset`, or the **Reset demo data** button. Five seconds, and the fake data is back exactly as the script expects. |
+| **Everything is wrong** | `npm run reset-demo` in `server/`: households only, every house grey. |
 
 ### One seam to know about before you narrate it
 

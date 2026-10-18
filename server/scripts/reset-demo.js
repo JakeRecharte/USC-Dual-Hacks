@@ -1,9 +1,9 @@
-// Puts the demo data back: every seeded status re-based to "N minutes before now", officer
-// taps from the last run removed, call log cleared. Run before every demo or rehearsal.
-//   npm run reset-demo               statuses + call log
+// Resets the database to a known state: officer taps from the last run removed, call log cleared.
+//   npm run reset-demo                 households only. No statuses, no damage: every house is
+//                                      unknown and grey until a real check is recorded.
 //   npm run reset-demo -- --keep-calls
 //
-// The seed is read from docs/seed.sql (P4's, generated from the board's own data), so the
+// The seed is read from docs/seed.sql (P4's, generated from the board's data), so the
 // board's numbers, the demo script and this reset can't drift apart. It used to be read from
 // §3 of docs/SUPABASE_SETUP.md; the seed moved to its own file once it passed three thousand
 // lines. The DB stores absolute times, so without this "cleared 40 minutes ago" is two hours
@@ -19,9 +19,6 @@ if (!db) {
 }
 
 const seed = await readFile(new URL('../../docs/seed.sql', import.meta.url), 'utf8');
-if (!seed.includes('insert into public.status_log')) {
-  throw new Error('docs/seed.sql has no status rows; regenerate it from the board data');
-}
 
 // Split one SQL tuple body on top-level commas, respecting 'quoted, strings'.
 function fields(tuple) {
@@ -45,7 +42,8 @@ const when = (v) => {
 };
 const nul = (v) => (v === 'null' ? null : v);
 
-const [addrSql, statusSql] = seed.split('insert into public.status_log');
+// The real seed has no status rows at all, so there may be nothing after the split.
+const [addrSql, statusSql = ''] = seed.split('insert into public.status_log');
 const statuses = tuples(statusSql).map(([address_id, status, source, note, recorded]) =>
   ({ address_id, status, source, note: nul(note), recorded_at: when(recorded) }));
 // Households come from the seed too: the board has been widened more than once and a
@@ -62,7 +60,7 @@ const bad = statuses.filter((r) => !r.address_id || !r.status || !r.recorded_at)
 const ids = new Set(households.map((h) => h.id));
 const orphans = statuses.filter((r) => !ids.has(r.address_id));
 const badHouses = households.filter((h) => !h.address || !Number.isFinite(h.lat) || !Number.isFinite(h.lng) || !h.resident_name);
-if (!statuses.length || !households.length || bad.length || orphans.length || badHouses.length) {
+if (!households.length || bad.length || orphans.length || badHouses.length) {
   throw new Error(`seed parse failed (${households.length} households, ${statuses.length} statuses; ${bad.length} bad, ` +
     `${orphans.length} orphaned, ${badHouses.length} bad households): nothing changed`);
 }
@@ -96,7 +94,8 @@ if (!process.argv.includes('--keep-calls')) {
 // Retell alerts from the last run (house_colors.sql); absent before that SQL runs.
 await db.from('house_events').delete().not('id', 'is', null);
 
-console.log(`reset: ${households.length} households synced (${stray.length} stray removed), ${statuses.length} statuses re-based to now, call log ${process.argv.includes('--keep-calls') ? 'kept' : 'cleared'}`);
+console.log(`reset: ${households.length} households synced (${stray.length} stray removed), ${statuses.length} statuses, call log ${process.argv.includes('--keep-calls') ? 'kept' : 'cleared'}`);
+console.log('every house is now unknown (grey) until a real check is recorded');
 
 // The telephony server keeps recent calls in memory for repeat-caller counts; clear that too.
 const server = process.env.PUBLIC_URL || 'https://usc-dual-hacks-production.up.railway.app';

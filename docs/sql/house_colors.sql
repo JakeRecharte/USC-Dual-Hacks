@@ -3,16 +3,26 @@
 -- Supabase -> SQL Editor, after houses.sql. Safe to run twice.
 --
 --   red    marked staying (refused), or a call about it needed a person now
---          (routing human_now / callback_queue, or emergency/distress heard live)
+--          (routing human_now / callback_queue, or emergency/distress heard live).
+--          An officer's check that is NEWER than that call and found the house cleared or
+--          self-evacuated closes the call out. A phone report, a resident reply, an unanswered
+--          knock or an older check does not: the urgent call stands.
 --   green  cleared or self-evacuated within the last 120 minutes
---   yellow everything else: never checked, no answer, evacuating, stale clear
+--   orange an officer knocked and got no answer
+--   yellow reported leaving (evacuating), no follow-up yet
+--   grey   no current verified record: never checked, or the last clear has gone stale.
+--          This is every house until a real check is recorded.
 --
+-- Time recolours too: a clear stops being green (it goes grey) 120 minutes after it was
+-- recorded. Nothing writes a row when that happens, so expire_house_colors() (below) does it
+-- once a minute.
+
 -- A house_events row is written when a RETELL call (a calls row, or a status_log row with
 -- source 'call') either links a house for the first time or changes its colour. Officer taps
 -- recolour houses too, but don't raise a Retell event.
 
 alter table public.houses
-  add column if not exists color            text not null default 'yellow' check (color in ('green', 'yellow', 'red')),
+  add column if not exists color            text not null default 'grey' check (color in ('green', 'yellow', 'orange', 'red', 'grey')),
   add column if not exists color_reason     text,
   add column if not exists color_changed_at timestamptz;
 
@@ -20,14 +30,25 @@ create table if not exists public.house_events (
   id             uuid primary key default gen_random_uuid(),
   house_id       uuid not null references public.houses(id) on delete cascade,
   address        text not null,
-  color          text not null check (color in ('green', 'yellow', 'red')),
-  previous_color text check (previous_color in ('green', 'yellow', 'red')),
+  color          text not null check (color in ('green', 'yellow', 'orange', 'red', 'grey')),
+  previous_color text check (previous_color in ('green', 'yellow', 'orange', 'red', 'grey')),
   first_call     boolean not null default false,   -- the house's first call to the line
   reason         text,
   call_id        text,
   created_at     timestamptz not null default now()
 );
 create index if not exists house_events_newest on public.house_events (created_at desc);
+
+-- A project that already ran an earlier version has narrower CHECKs and a yellow default.
+-- Widen them (drop-and-add is safe to repeat) and make grey the default.
+alter table public.houses alter column color set default 'grey';
+alter table public.houses drop constraint if exists houses_color_check;
+alter table public.houses add constraint houses_color_check check (color in ('green', 'yellow', 'orange', 'red', 'grey'));
+alter table public.house_events drop constraint if exists house_events_color_check;
+alter table public.house_events add constraint house_events_color_check check (color in ('green', 'yellow', 'orange', 'red', 'grey'));
+alter table public.house_events drop constraint if exists house_events_previous_color_check;
+alter table public.house_events add constraint house_events_previous_color_check
+  check (previous_color in ('green', 'yellow', 'orange', 'red', 'grey'));
 
 -- The colour rule, in one place.
 create or replace function public.house_color(p_status public.status_kind, p_checked timestamptz, p_house uuid)
@@ -38,6 +59,12 @@ language sql stable set search_path = public as $$
     from public.calls c
     where c.address_id = p_house
       and (c.routing in ('human_now', 'callback_queue') or c.bypass)
+      -- closed out by a later officer check that reached a conclusion (see the rules above)
+      and not coalesce(
+        p_status in ('cleared', 'self_out')
+        and p_checked > c.created_at
+        and (select h.evacuation_status_source from public.houses h where h.id = p_house) = 'officer',
+        false)
     order by c.created_at desc limit 1
   )
   select
@@ -45,7 +72,9 @@ language sql stable set search_path = public as $$
       when p_status = 'refused' then 'red'
       when exists (select 1 from urgent) then 'red'
       when p_status in ('cleared', 'self_out') and p_checked >= now() - interval '120 minutes' then 'green'
-      else 'yellow'
+      when p_status = 'no_answer' then 'orange'
+      when p_status = 'in_transit' then 'yellow'
+      else 'grey'
     end,
     case
       when p_status = 'refused' then 'people at this house are staying'
@@ -57,7 +86,7 @@ language sql stable set search_path = public as $$
       when p_status in ('cleared', 'self_out') then 'last check is more than 2 hours old'
       when p_status = 'no_answer' then 'last knock got no answer'
       when p_status = 'in_transit' then 'reported leaving, no follow-up'
-      else 'never checked'
+      else 'no verified record'
     end;
 $$;
 
@@ -141,6 +170,35 @@ create trigger houses_calls after insert or update of address_id, routing, bypas
 
 -- Colour every house now (no events: p_source is null).
 select public.refresh_house(id) from public.addresses;
+
+-- Time passing: a green house whose clear is now older than 120 minutes turns grey. Only
+-- greens can expire (red and yellow don't depend on the clock), so only those are refreshed.
+-- Returns how many houses it recoloured.
+create or replace function public.expire_house_colors() returns int
+language plpgsql security definer set search_path = public as $$
+declare
+  r record;
+  n int := 0;
+begin
+  for r in select id from public.houses
+           where color = 'green' and (last_checked_at is null or last_checked_at < now() - interval '120 minutes')
+  loop
+    perform public.refresh_house(r.id);
+    n := n + 1;
+  end loop;
+  return n;
+end $$;
+
+-- Run it every minute with pg_cron. If the extension isn't enabled on this project this prints
+-- a notice instead of failing: enable it (Dashboard -> Database -> Extensions -> pg_cron) and
+-- run this file again. Without it, a green house stays green after its clear goes stale until
+-- something else touches the house.
+do $$ begin
+  create extension if not exists pg_cron;
+  perform cron.schedule('expire-house-colors', '* * * * *', 'select public.expire_house_colors()');
+exception when others then
+  raise notice 'pg_cron not scheduled (%): enable it, then re-run house_colors.sql', sqlerrm;
+end $$;
 
 alter table public.house_events enable row level security;
 drop policy if exists "signed-in portals can read house events" on public.house_events;

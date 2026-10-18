@@ -78,7 +78,7 @@ anon key but shows an amber warning, because that state should not ship.
 - **`structure` is board-only.** Whether a house is still standing is a separate field from
   `status`, it never reaches the voice agent, and `/api/status` rejects it as a status value.
   See `docs/FRONTEND_CONTRACT.md`.
-- **Reset between demo runs.** The button in the dispatch header, or `POST /api/reset`.
+- **No sample data.** With no Supabase variables the app runs in memory mode: every household is grey, and only taps made since the server started appear. Nothing is invented.
 - **Map colours are validated, not chosen by eye.** The urgency steps were run through a
   contrast and colour-vision check against the paper ground; the note on `URGENCY_COLOR` in
   `src/lib/priority.ts` has the numbers. Re-run that check before changing them.
@@ -98,4 +98,4 @@ anon key but shows an amber warning, because that state should not ship.
   That is why the outlines are shipped as data instead of read from the basemap.
 - **Regenerating the data** is a one-off script, not part of the build. The household sites in
   `src/lib/household-sites.ts` and `public/buildings.json` were produced from an Overpass
-  query; `docs/seed.sql` is generated from `src/lib/addresses.ts`.
+  query; `docs/seed.sql` (households only) comes from `src/lib/addresses.ts`.

@@ -115,21 +115,27 @@ real phone call and the board agree on screen.
 Re-run the two deletes plus the inserts to reset between demo runs — the timestamps are
 relative to `now()`, so the ages re-base each time.
 
-Run **`docs/seed.sql`**. It is generated from `web/src/lib/addresses.ts`, so the board, the
-demo script's pre-flight numbers and the voice agent's fake data all describe the same
-households — about 3,600 lines, too long to paste here.
+`docs/seed.sql` is the only seed. Households only: no evacuation statuses, no notes, no damage
+assessments. Every house reads *unknown* and is **grey** until a real check is recorded.
+
+The households themselves are placeholders: the buildings are real (OpenStreetMap
+footprints), but the street addresses and resident names are invented until a real source
+replaces them. Clearing them would empty the map and leave `lookup_address` nothing to match.
 
 ```bash
 psql "$SUPABASE_DB_URL" -f docs/seed.sql
 ```
 
 Or paste it into the Supabase SQL editor. It begins with the two deletes, so re-running it
-resets the board between demo runs; the timestamps are relative to `now()`, so the ages
-re-base each time.
+resets the households. From `server/`, `npm run reset-demo` does the same plus clears the call log.
 
-After seeding, the dispatch board should read **1,108 unresolved of 1,998**, **83 refused**,
-**414 never contacted**, **202 stale clears**, with Rustic Canyon (`PAL-07`) worst at
-`183/229`. If it doesn't, the seed didn't take.
+After the seed, the board should read **1,998 houses, all grey, 0 refused**. If it doesn't, the
+seed didn't take.
+
+**A project that already holds the invented data:** run `docs/sql/house_colors.sql`, then
+`docs/sql/clear_fake_data.sql`. It deletes every status, call and Retell alert, resets the damage
+assessments, keeps the households, and leaves every house grey. It is destructive and says so.
+It cannot clear the telephony server's in-memory call list; restart the Railway service for that.
 
 **Every household sits on a real building.** The coordinates are centroids of OpenStreetMap
 dwelling footprints inside the perimeter, and `web/public/buildings.json` carries all 8,103
@@ -187,6 +193,69 @@ deploy publicly in that state.
 **If the Supabase variables are missing entirely** the app runs in memory mode: fully working
 for a local demo, but status is not shared between serverless instances, so the officer →
 dispatcher update will not arrive on Vercel. The header says which mode is live.
+
+## 5. One colour per house, shared by Retell and both dashboards
+
+Every house has a `color` in `public.houses` (one of five, in the table below), and **Supabase
+decides it**. Nothing in the web app or the telephony server computes it; they only write facts and read the
+result, so the phone line and the screens cannot disagree.
+
+```
+officer taps  ─► POST /api/status ─► status_log ─┐
+                                                 ├─► trigger ─► houses.color ─► Realtime ─► both maps
+Retell call ─► telephony server ─► calls ────────┘                │
+                                  └► status_log (source 'call')   └► house_events (Retell only) ─► the alert toast
+                                                                          ▲
+agent's lookup_address ◄── status_log (what an officer recorded) ─────────┘
+```
+
+| Colour | Means | Comes from |
+|---|---|---|
+| **Red** | Refused, or a caller needed a person now | status `refused`, or an urgent call (see below) |
+| **Orange** | No answer at the door | status `no_answer` |
+| **Yellow** | Evacuating | status `in_transit` |
+| **Green** | Cleared in the last 120 minutes | status `cleared` or `self_out`, recent |
+| **Grey** | No current verified record | status `unknown`, or a clear older than 120 minutes |
+
+Every house is grey until a real check is recorded. A `house_events` row ("Retell registered 1515 Via
+de la Paz as RED") is written only when a **Retell** call links a house for the first time or
+changes its colour; officer taps recolour the house but raise no alert.
+
+**Setup.** `docs/sql/setup_all.sql` builds all of it in order. Piecewise, the order is `calls.sql`,
+`calls_retell.sql`, `calls_map.sql`, `houses.sql`, `house_colors.sql`. Never re-run `houses.sql`
+after `house_colors.sql`: they both define `refresh_house`, and with two of them every Retell call
+that links a house fails to save. To redo the colour layer, re-run `house_colors.sql` alone.
+
+**Both sides must point at the same project.** The telephony server (Railway: `SUPABASE_URL`,
+`SUPABASE_SERVICE_ROLE_KEY`) and the web app (Vercel: the four Supabase variables above) each
+fall back to memory mode on their own if their variables are missing, and nothing shows an
+error. Check both:
+
+- `GET https://usc-dual-hacks-production.up.railway.app/health` should say `"mode": "supabase"`.
+- `GET /api/health?probe=1` on the web deployment should say `mode: supabase` and report
+  `houses_color`, `house_events` and `calls` as `ok`. After a real call, `calls.rows` above zero
+  proves the phone line is writing to the project the web app reads.
+
+**Check the whole chain.** Paste `docs/sql/check_house_colors.sql` into the SQL editor and run it.
+It returns a PASS/FAIL row per step (layers installed, Realtime publishing, a fake Retell call
+linking a house and turning it red, an officer tap, signed-in dashboards able to read it, anon
+able to read nothing) and names the file to run for anything that fails. It rolls everything back,
+so it is safe to run mid-demo.
+
+**When an urgent call goes away.** A house with an urgent call about it (`human_now`,
+`callback_queue`, or an emergency heard live) is red until an **officer's** check that is *newer
+than the call* finds it cleared or self-evacuated; then the normal rules apply (green, if the clear
+is under 120 minutes old). Deliberately not enough to close it: a phone report ("I've left"), a
+resident reply, an officer knock with no answer, or any check older than the call. A later urgent
+call turns it red again. The comparison is the check's `recorded_at` (when the officer stood at the
+door) against the call's `created_at`, so a tap queued offline and delivered late is judged by when
+it happened.
+
+**Greens expire.** Nothing writes a row when a clear turns 120 minutes old, so
+`expire_house_colors()` recolours those houses (to grey), and `house_colors.sql` schedules it every minute
+with `pg_cron`. If the extension is off on your project you get a notice, not an error: enable it
+(Dashboard, Database, Extensions) and run `house_colors.sql` again. Without the job, a green house
+stays green after its clear goes stale until something else touches the house.
 
 ## What I could not test
 

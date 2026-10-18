@@ -1,8 +1,15 @@
 // Regenerates docs/seed.sql from src/lib/addresses.ts, so Supabase holds exactly the
-// households the board and the map draw.
+// households the board and the map draw. Households only: no evacuation statuses, no damage
+// assessments. Every house reads "unknown" until someone records a check, and Supabase
+// colours it grey. There is no invented-data variant.
 //
 //   node --experimental-strip-types scripts/build-seed-sql.mjs
 //   node ../docs/sql/build-setup-all.mjs
+//
+// CAUTION: the household set comes from src/lib/household-sites.ts (all 8,103 OSM buildings, so
+// ~8,088 inside the perimeter). The committed docs/seed.sql holds 1,998 households,
+// the set the team's Supabase project was seeded with. Running this changes the household set
+// from 1,998 to ~8,088; run it only when that is what you mean.
 //
 // Ids: household a<N> becomes 00000000-0000-4000-8000-<N, 12 digits>, so the scripted
 // households a1..a8 keep the ids the voice agent and the tests know them by.
@@ -13,8 +20,7 @@ import { seedAddresses } from '../src/lib/addresses.ts';
 import { ZONE_NAMES } from '../src/lib/zones.ts';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const now = Date.now();
-const rows = seedAddresses(now);
+const rows = seedAddresses();
 
 const uuid = (id) => {
   const n = /^a(\d+)$/.exec(id);
@@ -22,38 +28,36 @@ const uuid = (id) => {
   return `00000000-0000-4000-8000-${n[1].padStart(12, '0')}`;
 };
 const q = (s) => (s == null ? 'null' : `'${String(s).replace(/'/g, "''")}'`);
-const ago = (iso) => (iso == null ? 'null' : `now() - interval '${Math.round((now - Date.parse(iso)) / 60_000)} minutes'`);
 
 const perZone = new Map();
 for (const r of rows) perZone.set(r.zone_id, (perZone.get(r.zone_id) ?? 0) + 1);
 
-const households = rows.map((r) =>
-  `  (${q(uuid(r.id))}, ${q(r.address)}, ${r.lat}, ${r.lng}, ${q(r.zone_id)}, ${q(r.resident_name)}, ${q(r.structure)}, ${ago(r.structure_recorded_at)})`);
-const statuses = rows.filter((r) => r.status !== 'unknown').map((r) =>
-  `  (${q(uuid(r.id))}, ${q(r.status)}, ${q(r.source)}, ${q(r.note)}, ${ago(r.recorded_at)})`);
+const householdRows = rows.map((r) =>
+  `  (${q(uuid(r.id))}, ${q(r.address)}, ${r.lat}, ${r.lng}, ${q(r.zone_id)}, ${q(r.resident_name)}, 'unassessed', null)`);
 
-const sql = `-- Seed data for the Line board. Generated from web/src/lib/addresses.ts by
--- web/scripts/build-seed-sql.mjs — do not edit by hand.
--- Run after the schema in docs/SUPABASE_SETUP.md §1-2. Re-run to reset between demo runs.
--- Timestamps are relative to now(), so the ages re-base every time this runs.
+const zoneList = [...perZone].map(([z, n]) => `--   ${z}  ${ZONE_NAMES[z]} (${n})`).join('\n');
+
+const seed = `-- Seed data for the Line board: households only. No evacuation statuses, no damage assessments.
+-- Every house reads "unknown" (grey on the board) until a real check is recorded.
+-- Generated from web/src/lib/addresses.ts by web/scripts/build-seed-sql.mjs — do not edit by hand.
+-- Run after the schema in docs/SUPABASE_SETUP.md §1-2.
+--
+-- The households themselves are placeholders: the buildings are real (OpenStreetMap footprints),
+-- but the street addresses and resident names are invented until a real source replaces them.
 
 delete from public.status_log;
 delete from public.addresses;
 
 -- ${rows.length} households across ${perZone.size} zones, generated from web/src/lib/addresses.ts.
-${[...perZone].map(([z, n]) => `--   ${z}  ${ZONE_NAMES[z]} (${n})`).join('\n')}
+${zoneList}
 
 insert into public.addresses
   (id, address, lat, lng, zone_id, resident_name, structure, structure_recorded_at)
 values
-${households.join(',\n')};
+${householdRows.join(',\n')};
 
-insert into public.status_log (address_id, status, source, note, recorded_at)
-values
-${statuses.join(',\n')};
-
--- ${statuses.length} of ${rows.length} households have a recorded status; the rest read "unknown".
+-- No status_log rows on purpose.
 `;
 
-writeFileSync(resolve(here, '../../docs/seed.sql'), sql);
-console.log(`wrote ${rows.length} households, ${statuses.length} statuses to docs/seed.sql`);
+writeFileSync(resolve(here, '../../docs/seed.sql'), seed);
+console.log(`wrote docs/seed.sql (${rows.length} households, no statuses)`);
