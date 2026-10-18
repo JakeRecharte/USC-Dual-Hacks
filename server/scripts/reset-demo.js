@@ -19,6 +19,13 @@ if (!db) {
 }
 
 const seed = await readFile(new URL('../../docs/seed.sql', import.meta.url), 'utf8');
+// This project does not load invented data. A seed with statuses or damage in it is the old demo
+// seed (a stale checkout, or a pasted file): refuse before anything is touched. The database refuses
+// it too (docs/sql/block_invented_data.sql), but failing here says why and changes nothing.
+if (/insert into public\.status_log/.test(seed) || /'(damaged|destroyed)'/.test(seed)) {
+  throw new Error('docs/seed.sql carries evacuation statuses or damage assessments: that is the old invented seed. ' +
+    'Pull the current docs/seed.sql (households only). Nothing was changed.');
+}
 
 // Split one SQL tuple body on top-level commas, respecting 'quoted, strings'.
 function fields(tuple) {

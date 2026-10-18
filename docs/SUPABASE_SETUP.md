@@ -132,6 +132,17 @@ resets the households. From `server/`, `npm run reset-demo` does the same plus c
 After the seed, the board should read **8,088 houses, all grey, 0 refused**. If it doesn't, the
 seed didn't take.
 
+**The old invented seed cannot be loaded back.** `docs/sql/block_invented_data.sql` (the last layer
+of `setup_all.sql`) makes the database refuse three things: more than 100 `status_log` rows in one
+statement, a household created already marked damaged or destroyed, and more than 25 households
+changed to a different damage state in one statement. Those are exactly how the invented data got
+in (a pasted `INSERT` of 6,408 statuses, the old `reset-demo` loading 1,000 at a time, 270 houses
+created damaged). A refused statement is rolled back, and in the SQL editor that includes any `DELETE`
+earlier in the same paste. Wiping is not blocked. It is a guard, not a lock: whoever owns the
+database can drop the triggers, and statuses can still be inserted in batches of 100, which real use
+never needs. `server/scripts/reset-demo.js` also refuses a seed file that contains statuses or damage.
+`docs/sql/check_house_colors.sql` confirms the guard is installed and refuses what it should.
+
 **A project that already holds the invented data:** run `docs/sql/house_colors.sql`, then
 `docs/sql/clear_fake_data.sql`. It deletes every status, call and Retell alert, resets the damage
 assessments, keeps the households, and leaves every house grey. It is destructive and says so.
@@ -222,7 +233,7 @@ de la Paz as RED") is written only when a **Retell** call links a house for the 
 changes its colour; officer taps recolour the house but raise no alert.
 
 **Setup.** `docs/sql/setup_all.sql` builds all of it in order. Piecewise, the order is `calls.sql`,
-`calls_retell.sql`, `calls_map.sql`, `houses.sql`, `house_colors.sql`. Never re-run `houses.sql`
+`calls_retell.sql`, `calls_map.sql`, `houses.sql`, `house_colors.sql`, `block_invented_data.sql`. Never re-run `houses.sql`
 after `house_colors.sql`: they both define `refresh_house`, and with two of them every Retell call
 that links a house fails to save. To redo the colour layer, re-run `house_colors.sql` alone.
 

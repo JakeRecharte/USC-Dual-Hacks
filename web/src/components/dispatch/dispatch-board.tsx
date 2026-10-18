@@ -316,34 +316,49 @@ const HOUSE_LEGEND_ITEMS: { color: HouseColor; label: string }[] = [
  * (houseColor() in priority.ts), so this key always matches what is drawn.
  */
 function Legend() {
+  const [open, setOpen] = useState(true);
   return (
     <div className="pointer-events-auto w-48 rounded-lg border border-paper-rule bg-paper-card/95 px-3 py-2.5 shadow-[0_12px_28px_-16px_rgba(43,29,18,.5)] backdrop-blur sm:w-56">
-      <div className="eyebrow">Evacuation status</div>
-
-      <ul className="mt-2 grid gap-1">
-        {HOUSE_LEGEND_ITEMS.map((i) => (
-          <li key={i.color} className="flex items-center gap-2 text-[11px] text-paper-ink-2">
-            <span
-              aria-hidden
-              className="inline-block h-2.5 w-2.5 shrink-0 rounded-full ring-1 ring-paper"
-              style={{ background: HOUSE_COLOR[i.color] }}
-            />
-            {i.label}
-          </li>
-        ))}
-      </ul>
-
-      <div className="mt-2 flex items-center gap-2 border-t border-paper-rule-soft pt-2 text-[11px] text-paper-ink-2">
-        <span
-          aria-hidden
-          className="inline-block h-2.5 w-2.5 shrink-0 rounded-[2px]"
-          style={{ background: '#7d8a96', opacity: 0.35 }}
-        />
-        Building, no record
+      <div className="flex items-center justify-between gap-2">
+        <div className="eyebrow">Evacuation status</div>
+        <button
+          type="button"
+          onClick={() => setOpen((o) => !o)}
+          aria-expanded={open}
+          aria-controls="map-legend-body"
+          aria-label={open ? 'Collapse key' : 'Expand key'}
+          className="-mr-1 flex h-5 w-5 shrink-0 items-center justify-center rounded text-base leading-none text-paper-ink-2 transition-colors hover:bg-paper-rule-soft"
+        >
+          <span aria-hidden>{open ? '−' : '+'}</span>
+        </button>
       </div>
-      <p className="mt-1.5 text-[11px] leading-snug text-paper-soft">
-        Dashed outline is the active fire perimeter.
-      </p>
+
+      <div id="map-legend-body" hidden={!open}>
+        <ul className="mt-2 grid gap-1">
+          {HOUSE_LEGEND_ITEMS.map((i) => (
+            <li key={i.color} className="flex items-center gap-2 text-[11px] text-paper-ink-2">
+              <span
+                aria-hidden
+                className="inline-block h-2.5 w-2.5 shrink-0 rounded-full ring-1 ring-paper"
+                style={{ background: HOUSE_COLOR[i.color] }}
+              />
+              {i.label}
+            </li>
+          ))}
+        </ul>
+
+        <div className="mt-2 flex items-center gap-2 border-t border-paper-rule-soft pt-2 text-[11px] text-paper-ink-2">
+          <span
+            aria-hidden
+            className="inline-block h-2.5 w-2.5 shrink-0 rounded-[2px]"
+            style={{ background: '#7d8a96', opacity: 0.35 }}
+          />
+          Building, no record
+        </div>
+        <p className="mt-1.5 text-[11px] leading-snug text-paper-soft">
+          Dashed outline is the active fire perimeter.
+        </p>
+      </div>
     </div>
   );
 }
