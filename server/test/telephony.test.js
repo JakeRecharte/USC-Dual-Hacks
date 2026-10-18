@@ -5,7 +5,7 @@ if (process.env.SUPABASE_URL) throw new Error('tests must not run against Supaba
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { checkBypass, callerText } from '../src/bypass.js';
-import { lookupAddress, logCall, logUnrouted, logTransferFailed, getCall, addressKey, nameMatches, spokenNumber, sameStreet, streetGeo } from '../src/backend.js';
+import { lookupAddress, logCall, logUnrouted, logTransferFailed, getCall, addressKey, nameMatches, findHousehold, spokenNumber, sameStreet, streetGeo } from '../src/backend.js';
 import { route, routineScore, FRESH_MIN } from '../src/routing.js';
 import { sayForLookup, sayForRouting } from '../src/speech.js';
 import { scoreDistress, handoffInstruction } from '../src/distress.js';
@@ -318,8 +318,28 @@ test('C: "he told me he is staying" from a relative is recorded as a phone repor
   assert.equal(Date.parse(r.recorded_at), now - 20 * 60000, 'recorded when the news is from, not now');
 });
 
-test('C: a relative saying "she is out" never clears a house', () => {
-  assert.ok(callReport({ reported_status: 'out', reported_by: 'relative_or_friend' }, { address_id: 'x', status: 'unknown' }, now).skip);
+test('C: a relative saying "she is out" never clears a house; it marks it evacuating, unverified', () => {
+  const r = callReport({ reported_status: 'out', reported_by: 'relative_or_friend' }, { address_id: 'x', status: 'unknown' }, now);
+  assert.equal(r.status, 'in_transit');
+  assert.match(r.note, /unverified/);
+  assert.ok(callReport({ reported_status: 'out', reported_by: 'relative_or_friend' }, { address_id: 'x', status: 'refused' }, now).skip);
+  assert.ok(callReport({ reported_status: 'out', reported_by: 'relative_or_friend' },
+    { address_id: 'x', status: 'cleared', recorded_at: new Date(now - 30 * 60000).toISOString() }, now).skip);
+  assert.equal(callReport({ reported_status: 'out', reported_by: 'relative_or_friend' },
+    { address_id: 'x', status: 'cleared', recorded_at: new Date(now - 300 * 60000).toISOString() }, now).status, 'in_transit');
+});
+
+test('B6: speech-recognition slips in a name still match; a different person does not', () => {
+  assert.equal(nameMatches('Ibrahim Fischer', 'Abraham Fisher'), true);
+  assert.equal(nameMatches('Oscar Raman', 'Oscar Ramen'), true);
+  assert.equal(nameMatches('Priscilla Demir', 'Priscilla de la Mirror'), true);
+  assert.equal(nameMatches('Oscar Raman', 'Oscar Robin'), false);
+  assert.equal(nameMatches('Ruth Adams', 'Ruth Adkins'), false);
+});
+
+test('B8: a misheard street with the same sound and number finds the house', () => {
+  const rows = [{ id: 'd', address: '294 Dryad Rd' }, { id: 'o', address: '294 Ocampo Dr' }];
+  assert.equal(findHousehold(rows, '294 Dyerida Road', 'Priscilla Demir')?.id, 'd');
 });
 
 test('C: a resident saying "I am out" is recorded, unless the house is marked staying', () => {

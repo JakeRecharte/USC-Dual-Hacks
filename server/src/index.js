@@ -8,7 +8,7 @@ import * as sessions from './sessions.js';
 import * as backend from './backend.js';
 import { dbHealth } from './db.js';
 import { FRESH_MIN } from './routing.js';
-import { sayForLookup, sayForRouting, sayResidentOut } from './speech.js';
+import { NAME_GIVE_UP, sayForLookup, sayForRouting, sayResidentOut } from './speech.js';
 
 const app = Fastify({ logger: { level: 'info' } });
 const retell = config.retellApiKey ? new Retell({ apiKey: config.retellApiKey }) : null;
@@ -71,13 +71,17 @@ app.post('/fn/lookup_address', { preHandler: verifyRetell }, async (req, reply) 
   const { call, args } = argsOf(req.body);
   const now = Date.now();
   const { _geo: geo, ...lookup } = await backend.lookupAddress(args, now);
-  const say = sayForLookup(lookup, args.subject_name, now, FRESH_MIN);
+  const prior = sessions.get(call.call_id);
+  const misses = (prior?.name_misses ?? 0) + (lookup.found && !lookup.name_match ? 1 : 0);
+  const say = lookup.found && !lookup.name_match && misses >= 2
+    ? NAME_GIVE_UP
+    : sayForLookup(lookup, args.subject_name, now, FRESH_MIN);
 
   // Answer first: the caller is listening to silence until this returns.
   reply.send({ ...lookup, say });
 
   setImmediate(() => {
-    sessions.upsert(call.call_id, { address: args.address, subject_name: args.subject_name, lookup });
+    sessions.upsert(call.call_id, { address: args.address, subject_name: args.subject_name, lookup, name_misses: misses });
     backend.patchCall(call.call_id, {
       address: args.address, subject_name: args.subject_name, address_id: lookup.address_id,
       lookup_found: lookup.found, lookup_status: lookup.status, name_match: lookup.name_match,

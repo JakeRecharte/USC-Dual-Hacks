@@ -5,8 +5,13 @@
 // - "he told me he's staying" (anyone)        → refused, onto the door-knock list
 // - "I'm still here" (the resident)           → refused (and log_call sends them to a person)
 // - "I'm out" (the resident)                  → self_out, unless the house is marked staying
-// - "she texted she's out" (relative/friend)  → NOT written: a third-hand "out" must never take
-//   a house off the door-knock list (pitch_v2.md: false or prank replies)
+// - "she texted she's out" (relative/friend)  → in_transit ("Evacuating"), marked unverified.
+//   It shows on the map and keeps the house on the door-knock list: a second-hand "out" must
+//   never clear a house (pitch_v2.md: false or prank replies), but writing nothing left
+//   callers watching a house that never moved. Never written over "staying" or a fresh clear.
+
+// Same window as the board's "fresh" clear (web/src/lib/priority.ts FRESH_MIN).
+const FRESH_MIN = 120;
 
 export function callReport(call, current, now) {
   if (!call.reported_status) return null;
@@ -22,7 +27,14 @@ export function callReport(call, current, now) {
     return { ...base, status: 'refused', note: `phone report (${who}): ${call.caller_update || 'staying at the address'}` };
   }
   if (call.reported_status === 'out') {
-    if (!resident) return { skip: 'a relative or friend saying they are out does not clear a house' };
+    if (!resident) {
+      if (current.status === 'refused') return { skip: 'a relative says out but the house is marked staying; a person checks' };
+      const age = current.recorded_at ? (now - Date.parse(current.recorded_at)) / 60000 : Infinity;
+      if ((current.status === 'cleared' || current.status === 'self_out') && age <= FRESH_MIN) {
+        return { skip: 'house already cleared recently' };
+      }
+      return { ...base, status: 'in_transit', note: `phone report (${who}, unverified): ${call.caller_update || 'says they got out'}` };
+    }
     if (current.status === 'refused') return { skip: 'resident says out but the house is marked staying; a person checks' };
     return { ...base, status: 'self_out', note: 'phone report (resident): out of the area' };
   }

@@ -13,6 +13,11 @@ export function when(iso, now) {
   return `at ${clock}, ${ago}`;
 }
 
+// After two names that don't match the record, stop asking: the caller has tried, and a
+// third "first and last name?" is the loop a real caller sat through four times.
+export const NAME_GIVE_UP =
+  "I can't match that name to our record for that address, so I can't share its status. If you have news about them, or you're worried, I can connect you to a person.";
+
 export function sayForLookup(lookup, subjectName, now, freshMin) {
   if (!lookup.found) {
     return lookup.inside_perimeter
