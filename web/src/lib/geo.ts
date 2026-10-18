@@ -117,3 +117,12 @@ export function offsetMetres([lat, lng]: LatLng, northM: number, eastM: number):
   const cosLat = Math.max(Math.cos(midLat), 1e-6);
   return [nextLat, lng + eastM / (mPerDegLat * cosLat)];
 }
+
+/** Compass bearing from one point to another, degrees clockwise from north. */
+export function bearing([latA, lngA]: LatLng, [latB, lngB]: LatLng): number {
+  const midLat = ((latA + latB) / 2) * (Math.PI / 180);
+  const north = latB - latA;
+  const east = (lngB - lngA) * Math.cos(midLat);
+  const deg = (Math.atan2(east, north) * 180) / Math.PI;
+  return (deg + 360) % 360;
+}

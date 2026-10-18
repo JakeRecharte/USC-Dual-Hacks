@@ -11,7 +11,7 @@
 import dynamic from 'next/dynamic';
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { NEARBY_RADIUS_FT, NEARBY_RADIUS_M, distanceMetres, within } from '@/lib/geo';
-import { useOfficerPosition, type GpsState, type SimControl } from '@/lib/officer-position';
+import { useOfficerPosition, type GpsState } from '@/lib/officer-position';
 import { useOfflineQueue } from '@/lib/offline-queue';
 import { STATUS_COLOR, relativeMinutes, ageMinutes, urgencyOf } from '@/lib/priority';
 import { useAddresses, useNow } from '@/lib/use-live';
@@ -55,7 +55,7 @@ export function OfficerPortal() {
   );
   const { pending, online, enqueue } = useOfflineQueue(applyRows);
 
-  const { position, mode, gps, route, control, setControl } = useOfficerPosition(addresses);
+  const { position, mode, gps } = useOfficerPosition(addresses);
 
   const [follow, setFollow] = useState(true);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -114,12 +114,11 @@ export function OfficerPortal() {
         <OfficerMap
           households={addresses}
           position={position}
-          route={route}
           follow={follow}
           selectedId={selectedId}
           // Driving emits 20 positions a second; easing each one would lag a frame behind
-          // the key. GPS and the auto walk arrive once a second and ease smoothly.
-          continuous={mode === 'simulated' && control === 'manual'}
+          // the key. GPS arrives once a second and eases smoothly.
+          continuous={mode === 'simulated'}
           onSelect={setSelectedId}
           onBreakFollow={() => setFollow(false)}
           onRecenterReady={onRecenterReady}
@@ -158,8 +157,6 @@ export function OfficerPortal() {
           gps={gps}
           simulated={mode === 'simulated'}
           online={online}
-          control={control}
-          onControl={setControl}
         />
       </header>
 
@@ -200,35 +197,31 @@ export function OfficerPortal() {
 
 const SIMULATED_REASON: Record<GpsState, string | null> = {
   live: null,
-  locating: 'Finding your GPS. Showing a simulated walk until it arrives.',
-  demo: 'Demo mode — simulated officer walking a block in Pacific Palisades.',
+  locating: 'Finding your GPS. Showing a placeholder position until it arrives.',
+  demo: 'Demo mode — GPS not requested. The marker is a placeholder you move by hand.',
   out_of_area:
-    'You are outside the fire perimeter, so the map is showing a simulated walk through the households.',
-  denied: 'Location permission is off. Showing a simulated walk — taps still record normally.',
-  timeout: 'No GPS fix yet. Showing a simulated walk until one arrives.',
-  unavailable: 'This device reports no location. Showing a simulated walk.',
+    'You are outside the fire perimeter, so the map is showing a placeholder position you move by hand.',
+  denied: 'Location permission is off. Showing a placeholder position — taps still record normally.',
+  timeout: 'No GPS fix yet. Showing a placeholder position until one arrives.',
+  unavailable: 'This device reports no location. Showing a placeholder position.',
 };
 
 /**
  * Why the dot is where it is. Always on screen when the position is not a real fix: an
- * officer must never be able to mistake a simulated walk for their own GPS, and a demo
+ * officer must never be able to mistake a placeholder position for their own GPS, and a demo
  * audience should be told rather than fooled.
  */
 function PositionNotice({
   gps,
   simulated,
   online,
-  control,
-  onControl,
 }: {
   gps: GpsState;
   simulated: boolean;
   online: boolean;
-  control: SimControl;
-  onControl: (next: SimControl) => void;
 }) {
   // One line per reason the dot is not a real fix. `live` never reaches here, and
-  // `locating` does: the walk starts straight away so the officer has a usable map, which
+  // `locating` does: the marker appears straight away so the officer has a usable map, which
   // means it has to be labelled straight away too.
   const notice = simulated ? SIMULATED_REASON[gps] : null;
 
@@ -242,28 +235,10 @@ function PositionNotice({
             </span>
             <span className="text-muted">{notice}</span>
           </p>
-          <div className="mt-2 flex items-center justify-between gap-3 border-t border-line pt-2">
-            <p className="text-[11px] leading-tight text-muted">
-              {control === 'manual' ? (
-                <>
-                  <Keys>W A S D</Keys> or <Keys>arrows</Keys> to move, <Keys>shift</Keys> to
-                  go faster.
-                </>
-              ) : (
-                <>
-                  Walking the block on its own. Press <Keys>W A S D</Keys> or an{' '}
-                  <Keys>arrow</Keys> to take over.
-                </>
-              )}
-            </p>
-            <button
-              type="button"
-              onClick={() => onControl(control === 'manual' ? 'auto' : 'manual')}
-              className="shrink-0 rounded-lg border border-line px-2.5 py-1.5 text-xs font-semibold text-muted active:bg-panel-2"
-            >
-              {control === 'manual' ? 'Auto walk' : 'Drive'}
-            </button>
-          </div>
+          <p className="mt-2 border-t border-line pt-2 text-[11px] leading-tight text-muted">
+            <Keys>W A S D</Keys> or <Keys>arrows</Keys> to move, <Keys>shift</Keys> to go
+            faster.
+          </p>
         </div>
       )}
       {!online && (

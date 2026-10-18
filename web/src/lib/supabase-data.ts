@@ -139,7 +139,7 @@ export async function fetchBoard(client: SupabaseClient): Promise<AddressState[]
   return withColors(joinRows(addresses, statuses), colors);
 }
 
-const HOUSE_COLORS: HouseColor[] = ['green', 'yellow', 'red'];
+const HOUSE_COLORS: HouseColor[] = ['green', 'yellow', 'orange', 'red', 'grey'];
 
 /** Attach Supabase's colour to each household; unknown values are ignored, not trusted. */
 export function withColors(rows: AddressState[], colors: HouseColorRowDb[]): AddressState[] {

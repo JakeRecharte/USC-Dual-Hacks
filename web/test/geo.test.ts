@@ -5,6 +5,7 @@ import { describe, it } from 'node:test';
 import {
   NEARBY_RADIUS_FT,
   NEARBY_RADIUS_M,
+  bearing,
   distanceMetres,
   nearest,
   offsetMetres,
@@ -173,5 +174,16 @@ describe('offsetMetres', () => {
     const there = offsetMetres(ORIGIN, 37, -21);
     const back = offsetMetres(there, -37, 21);
     assert.ok(distanceMetres(ORIGIN, back) < 0.01);
+  });
+});
+
+describe('bearing', () => {
+  const origin: [number, number] = [34.0401, -118.5232];
+
+  it('reads north, east, south and west off the compass', () => {
+    assert.ok(Math.abs(bearing(origin, [34.05, -118.5232]) - 0) < 0.5);
+    assert.ok(Math.abs(bearing(origin, [34.0401, -118.51]) - 90) < 0.5);
+    assert.ok(Math.abs(bearing(origin, [34.03, -118.5232]) - 180) < 0.5);
+    assert.ok(Math.abs(bearing(origin, [34.0401, -118.54]) - 270) < 0.5);
   });
 });

@@ -11,7 +11,7 @@ import type { Map as MlMap, StyleSpecification } from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { PERIMETER, ZONE_NAMES, type LatLngTuple } from '@/lib/zones';
 import { describeMapError } from '@/lib/webgl';
-import { HOUSE_COLOR, URGENCY_COLOR, reasonOf, urgencyOf, zoneSummaries } from '@/lib/priority';
+import { HOUSE_COLOR, houseColor, reasonOf } from '@/lib/priority';
 import { STATUS_LABEL, STRUCTURE_LABEL } from '@/lib/types';
 import type { AddressState } from '@/lib/types';
 
@@ -22,8 +22,6 @@ import type { AddressState } from '@/lib/types';
  */
 const maplibregl = ((maplibreNs as unknown as { default?: typeof maplibreNs }).default ??
   maplibreNs) as typeof maplibreNs;
-
-export type MapMode = 'buildings' | 'zones';
 
 const PAPER = '#f4efe6';
 const CONTEXT = '#7d8a96';
@@ -239,34 +237,13 @@ const metresToDegrees = (metres: number, lat: number) => ({
   lng: metres / (111_320 * Math.cos((lat * Math.PI) / 180)),
 });
 
-/** A circle as a polygon ring, for the zone overlay. */
-function circlePolygon(lat: number, lng: number, radiusM: number, steps = 48): [number, number][] {
-  const d = metresToDegrees(radiusM, lat);
-  return Array.from({ length: steps + 1 }, (_, i) => {
-    const a = (i / steps) * Math.PI * 2;
-    return [lng + d.lng * Math.cos(a), lat + d.lat * Math.sin(a)] as [number, number];
-  });
-}
-
-const haversine = (a: LatLngTuple, b: LatLngTuple): number => {
-  const R = 6_371_000;
-  const dLat = ((b[0] - a[0]) * Math.PI) / 180;
-  const dLng = ((b[1] - a[1]) * Math.PI) / 180;
-  const s =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos((a[0] * Math.PI) / 180) * Math.cos((b[0] * Math.PI) / 180) * Math.sin(dLng / 2) ** 2;
-  return 2 * R * Math.asin(Math.sqrt(s));
-};
-
 export function ZoneMap({
   addresses,
-  mode,
   now,
   focusId,
   onSelect,
 }: {
   addresses: AddressState[];
-  mode: MapMode;
   now: number;
   focusId: string | null;
   onSelect: (id: string) => void;
@@ -277,8 +254,8 @@ export function ZoneMap({
   const selectRef = useRef(onSelect);
   selectRef.current = onSelect;
   // Latest data, so the load handler can paint whatever has arrived by then.
-  const dataRef = useRef({ addresses, now, mode });
-  dataRef.current = { addresses, now, mode };
+  const dataRef = useRef({ addresses, now });
+  dataRef.current = { addresses, now };
   const outlinesRef = useRef<Outlines | null>(null);
 
   const [mapError, setMapError] = useState<string | null>(null);
@@ -334,7 +311,7 @@ export function ZoneMap({
           geometry: { type: 'Polygon', coordinates: [ring] },
         })),
       });
-      paint(map, dataRef.current.addresses, dataRef.current.now, dataRef.current.mode, outlines);
+      paint(map, dataRef.current.addresses, dataRef.current.now, outlines);
     });
 
     map.on('load', () => {
@@ -346,7 +323,6 @@ export function ZoneMap({
           geometry: { type: 'Polygon', coordinates: [[...PERIMETER.map(toLngLat), toLngLat(PERIMETER[0])]] },
         },
       });
-      map.addSource('zones', { type: 'geojson', data: emptyCollection() });
       map.addSource('context-buildings', { type: 'geojson', data: emptyCollection() });
       map.addSource('households', { type: 'geojson', data: emptyCollection() });
       // Stand in for the outlines when zoomed out far enough that a footprint is smaller
@@ -361,27 +337,6 @@ export function ZoneMap({
         id: 'perimeter-line', type: 'line', source: 'perimeter',
         paint: { 'line-color': '#9b2c1f', 'line-width': 1.5, 'line-opacity': 0.8, 'line-dasharray': [4, 3] },
       }, LABELS);
-
-      map.addLayer({
-        id: 'zone-fill', type: 'fill', source: 'zones', layout: { visibility: 'none' },
-        paint: { 'fill-color': ['get', 'color'], 'fill-opacity': ['get', 'fillOpacity'] },
-      }, LABELS);
-      map.addLayer({
-        id: 'zone-line', type: 'line', source: 'zones', layout: { visibility: 'none' },
-        paint: { 'line-color': ['get', 'color'], 'line-width': 1.25, 'line-opacity': 0.75 },
-      }, LABELS);
-      map.addLayer({
-        id: 'zone-label', type: 'symbol', source: 'zones', layout: {
-          visibility: 'none',
-          'text-field': ['get', 'label'],
-          'text-font': ['Noto Sans Regular'],
-          'text-size': 11,
-          'text-letter-spacing': 0.08,
-          'text-transform': 'uppercase',
-          'text-allow-overlap': true,
-        },
-        paint: { 'text-color': ['get', 'color'], 'text-halo-color': PAPER, 'text-halo-width': 1.6 },
-      });
 
       // Every dwelling the perimeter contains, including the ones with no record. Grey, the
       // way the reference greys parcels outside the current filter: present, not tracked.
@@ -434,7 +389,7 @@ export function ZoneMap({
       map.fitBounds(boundsOf(PERIMETER), { padding: 28, animate: false });
 
       readyRef.current = true;
-      paint(map, dataRef.current.addresses, dataRef.current.now, dataRef.current.mode, outlinesRef.current);
+      paint(map, dataRef.current.addresses, dataRef.current.now, outlinesRef.current);
     });
 
     return () => {
@@ -445,12 +400,12 @@ export function ZoneMap({
     };
   }, []);
 
-  // Repaint on data, clock or mode change.
+  // Repaint on data or clock change.
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !readyRef.current) return;
-    paint(map, addresses, now, mode, outlinesRef.current);
-  }, [addresses, now, mode]);
+    paint(map, addresses, now, outlinesRef.current);
+  }, [addresses, now]);
 
   // Clicking a row in the lists flies to that household.
   useEffect(() => {
@@ -492,29 +447,26 @@ function paint(
   map: MlMap,
   addresses: AddressState[],
   now: number,
-  mode: MapMode,
   outlines: Outlines | null,
 ): void {
   if (addresses.length === 0) return;
 
   const households = map.getSource('households') as maplibregl.GeoJSONSource | undefined;
   const points = map.getSource('household-points') as maplibregl.GeoJSONSource | undefined;
-  const zones = map.getSource('zones') as maplibregl.GeoJSONSource | undefined;
-  if (!households || !points || !zones) return;
+  if (!households || !points) return;
 
   // One feature per household, carrying the real outline of its building. A household whose
   // outline is missing falls back to a small square so it is never invisible.
   households.setData({
     type: 'FeatureCollection',
     features: addresses.map((a) => {
-      const urgency = urgencyOf(a, now);
       const ring = outlines?.bySite.get(siteKey(a.lat, a.lng)) ?? squareAround(a.lat, a.lng);
       return {
         type: 'Feature',
         geometry: { type: 'Polygon', coordinates: [ring] },
         properties: {
           id: a.id,
-          color: a.color ? HOUSE_COLOR[a.color] : URGENCY_COLOR[urgency],
+          color: HOUSE_COLOR[houseColor(a, now)],
           fillOpacity: 0.85,
           popup: popupHtml(a, now),
         },
@@ -525,39 +477,16 @@ function paint(
   points.setData({
     type: 'FeatureCollection',
     features: addresses.map((a) => {
-      const urgency = urgencyOf(a, now);
       return {
         type: 'Feature',
         geometry: { type: 'Point', coordinates: [a.lng, a.lat] },
         properties: {
-          color: a.color ? HOUSE_COLOR[a.color] : URGENCY_COLOR[urgency],
+          color: HOUSE_COLOR[houseColor(a, now)],
           dotOpacity: 0.9,
         },
       } satisfies GeoJSON.Feature;
     }),
   });
-
-  zones.setData({
-    type: 'FeatureCollection',
-    features: zoneSummaries(addresses.filter((a) => a.inside_perimeter), now).map((z) => {
-      const members = addresses.filter((a) => a.zone_id === z.zone_id);
-      const radius = Math.max(340, ...members.map((a) => haversine([z.lat, z.lng], [a.lat, a.lng]))) * 1.05;
-      return {
-        type: 'Feature',
-        geometry: { type: 'Polygon', coordinates: [circlePolygon(z.lat, z.lng, radius)] },
-        properties: {
-          color: URGENCY_COLOR[z.urgency],
-          fillOpacity: z.urgency === 'clear' ? 0.05 : 0.12,
-          label: `${z.zone_id} · ${z.unresolved}/${z.total}`,
-        },
-      } satisfies GeoJSON.Feature;
-    }),
-  });
-
-  const zoneVisible = mode === 'zones' ? 'visible' : 'none';
-  for (const id of ['zone-fill', 'zone-line', 'zone-label']) {
-    if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', zoneVisible);
-  }
 }
 
 /** Fallback outline, about the footprint of a small house, for a household with no ring. */
@@ -576,7 +505,6 @@ const escapeHtml = (s: string): string =>
   s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
 
 function popupHtml(a: AddressState, now: number): string {
-  const urgency = urgencyOf(a, now);
   const damage =
     a.structure === 'unassessed'
       ? ''
@@ -595,7 +523,7 @@ function popupHtml(a: AddressState, now: number): string {
         a.address,
       )}</div>
       <div style="margin-top:2px;color:#6f665a">${escapeHtml(a.resident_name)}</div>
-      <div style="margin-top:7px;color:${a.color ? HOUSE_COLOR[a.color] : URGENCY_COLOR[urgency]};font-weight:600">${STATUS_LABEL[a.status]}${a.color_reason ? ` · ${a.color_reason}` : ''}</div>
+      <div style="margin-top:7px;color:${HOUSE_COLOR[houseColor(a, now)]};font-weight:600">${STATUS_LABEL[a.status]}${a.color_reason ? ` · ${a.color_reason}` : ''}</div>
       <div style="color:#6f665a">${escapeHtml(reasonOf(a, now))}</div>
       ${damage}
       ${note}

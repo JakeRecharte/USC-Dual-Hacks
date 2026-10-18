@@ -14,9 +14,9 @@ import { useEffect, useRef, useState } from 'react';
 import * as maplibreNs from 'maplibre-gl';
 import type { Map as MlMap, StyleSpecification } from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
-import { HOUSE_COLOR, STATUS_COLOR } from '@/lib/priority';
+import { HOUSE_COLOR, houseColor } from '@/lib/priority';
 import { describeMapError } from '@/lib/webgl';
-import { NEARBY_RADIUS_M, type LatLng } from '@/lib/geo';
+import { NEARBY_RADIUS_M } from '@/lib/geo';
 import type { OfficerPosition } from '@/lib/officer-position';
 import type { AddressState } from '@/lib/types';
 
@@ -192,7 +192,6 @@ function headingCone(lat: number, lng: number, heading: number, radiusM = 26): [
 export function OfficerMap({
   households,
   position,
-  route,
   follow,
   selectedId,
   continuous,
@@ -203,8 +202,6 @@ export function OfficerMap({
   /** The households in range, already filtered. These are the only tappable houses. */
   households: AddressState[];
   position: OfficerPosition | null;
-  /** The simulated walk, drawn as a dotted line. Empty under real GPS. */
-  route: LatLng[];
   follow: boolean;
   selectedId: string | null;
   /** True when positions arrive many times a second, as they do while driving by keyboard. */
@@ -220,8 +217,8 @@ export function OfficerMap({
   const readyRef = useRef(false);
   const outlinesRef = useRef<Map<string, [number, number][]> | null>(null);
   // Latest props, so MapLibre's own handlers always see current values without rebinding.
-  const stateRef = useRef({ households, position, route, selectedId, follow, continuous });
-  stateRef.current = { households, position, route, selectedId, follow, continuous };
+  const stateRef = useRef({ households, position, selectedId, follow, continuous });
+  stateRef.current = { households, position, selectedId, follow, continuous };
   const callbacks = useRef({ onSelect, onBreakFollow });
   callbacks.current = { onSelect, onBreakFollow };
   /** Set while the component is moving the map itself, so follow does not break itself. */
@@ -286,7 +283,6 @@ export function OfficerMap({
       map.addSource('houses', { type: 'geojson', data: emptyCollection() });
       map.addSource('selected', { type: 'geojson', data: emptyCollection() });
       map.addSource('range', { type: 'geojson', data: emptyCollection() });
-      map.addSource('walk', { type: 'geojson', data: emptyCollection() });
       map.addSource('officer', { type: 'geojson', data: emptyCollection() });
       map.addSource('accuracy', { type: 'geojson', data: emptyCollection() });
       map.addSource('cone', { type: 'geojson', data: emptyCollection() });
@@ -357,11 +353,6 @@ export function OfficerMap({
         },
       });
 
-      map.addLayer({
-        id: 'walk', type: 'line', source: 'walk',
-        paint: { 'line-color': '#38bdf8', 'line-width': 3, 'line-opacity': 0.5, 'line-dasharray': [2, 2] },
-      }, LABELS);
-
       // The radius the header counts, shown rather than implied.
       map.addLayer({
         id: 'range-line', type: 'line', source: 'range',
@@ -424,7 +415,7 @@ export function OfficerMap({
       const first = stateRef.current;
       paintHouses(map, first.households, outlinesRef.current);
       paintSelection(map, first.households, first.selectedId, outlinesRef.current);
-      paintOfficer(map, first.position, first.route);
+      paintOfficer(map, first.position);
       const p = stateRef.current.position;
       if (p) map.jumpTo({ center: [p.lng, p.lat], zoom: FOLLOW_ZOOM });
     });
@@ -484,8 +475,8 @@ export function OfficerMap({
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !readyRef.current) return;
-    paintOfficer(map, position, route);
-  }, [position, route]);
+    paintOfficer(map, position);
+  }, [position]);
 
   // Follow mode. Nothing here runs while follow is off, which is what makes a drag stick:
   // the next GPS tick moves the dot and leaves the frame exactly where the officer put it.
@@ -561,10 +552,10 @@ function paintHouses(
       const ring = outlines?.get(siteKey(a.lat, a.lng)) ?? squareAround(a.lat, a.lng);
       const shared = {
         id: a.id,
-        // Supabase's colour (record + Retell calls) when it has one; else the status colour.
-        color: a.color ? HOUSE_COLOR[a.color] : STATUS_COLOR[a.status],
-        // `unknown` is drawn lighter than `no_answer`: same colour, different weight, so
-        // "never contacted" and "knocked, nobody home" are not the same mark.
+        // Supabase's colour (record + Retell calls) when it has one; else the same rule from the status.
+        color: HOUSE_COLOR[houseColor(a, Date.now())],
+        // `unknown` is drawn lighter than the rest, so a house nobody has heard from reads as
+        // a background mark and not as a result.
         fillOpacity: a.status === 'unknown' ? 0.45 : 0.85,
         number: houseNumber(a.address),
       };
@@ -609,19 +600,8 @@ function paintSelection(
   );
 }
 
-/** The officer: dot, accuracy, heading, range ring, and the walk they are following. */
-function paintOfficer(map: MlMap, position: OfficerPosition | null, route: LatLng[]): void {
-  const walk = map.getSource('walk') as maplibregl.GeoJSONSource | undefined;
-  walk?.setData(
-    route.length > 1
-      ? {
-          type: 'Feature',
-          properties: {},
-          geometry: { type: 'LineString', coordinates: route.map(([lat, lng]) => [lng, lat]) },
-        }
-      : emptyCollection(),
-  );
-
+/** The officer: dot, accuracy, heading and range ring. */
+function paintOfficer(map: MlMap, position: OfficerPosition | null): void {
   const officer = map.getSource('officer') as maplibregl.GeoJSONSource | undefined;
   const accuracy = map.getSource('accuracy') as maplibregl.GeoJSONSource | undefined;
   const cone = map.getSource('cone') as maplibregl.GeoJSONSource | undefined;

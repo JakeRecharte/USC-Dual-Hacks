@@ -7,6 +7,7 @@ import { useMemo, useState } from 'react';
 // says so in its own header, and this import was quietly undoing it.
 import { ZONE_NAMES } from '@/lib/zones';
 import {
+  HOUSE_COLOR,
   URGENCY_COLOR,
   doorKnockList,
   isStale,
@@ -17,10 +18,9 @@ import {
   type Urgency,
 } from '@/lib/priority';
 import { CALLER_STATE_LABEL, DISTRESS_THRESHOLD, ROUTING_LABEL, ROUTING_RANK } from '@/lib/types';
-import type { AddressState, CallRow, CallerState } from '@/lib/types';
+import type { AddressState, CallRow, CallerState, HouseColor } from '@/lib/types';
 import { telephonyConfigured, useAddresses, useCalls, useNow } from '@/lib/use-live';
-import { ConnectionDot, ResetButton, SignOutButton, StatusChip, StructureChip } from '@/components/ui';
-import type { MapMode } from './zone-map';
+import { SignOutButton, StatusChip, StructureChip } from '@/components/ui';
 import { RetellAlerts } from './retell-alerts';
 
 // Leaflet touches `window` at import time, so the map only ever loads in the browser.
@@ -34,11 +34,10 @@ const ZoneMap = dynamic(() => import('./zone-map').then((m) => m.ZoneMap), {
 });
 
 export function DispatchBoard() {
-  const { addresses, connection, mode: dataMode, gated, error } = useAddresses();
-  const { calls, connection: callFeed, upsert } = useCalls();
+  const { addresses, gated, error } = useAddresses();
+  const { calls } = useCalls();
   const now = useNow(15_000);
 
-  const [mode, setMode] = useState<MapMode>('buildings');
   const [focusId, setFocusId] = useState<string | null>(null);
 
   const inPerimeter = useMemo(() => addresses.filter((a) => a.inside_perimeter), [addresses]);
@@ -79,24 +78,9 @@ export function DispatchBoard() {
             <h1 className="text-base font-semibold leading-tight tracking-tight">
               Dispatch — Palisades incident
             </h1>
-            <p className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-muted">
-              <ConnectionDot
-                state={connection}
-                label={`${dataMode === 'supabase' ? 'Database' : 'Status feed'} ${connection}`}
-              />
-              <ConnectionDot
-                state={callFeed}
-                label={telephonyConfigured ? `Call feed ${callFeed}` : 'Call feed not configured'}
-              />
-              {dataMode === 'memory' && (
-                <span className="text-watch">in-memory — not shared across servers</span>
-              )}
-            </p>
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <DemoCalls onInject={upsert} />
-          <ResetButton />
           <SignOutButton />
         </div>
       </header>
@@ -144,31 +128,13 @@ export function DispatchBoard() {
           <div className="relative min-h-[460px] flex-1 overflow-hidden rounded-2xl border border-line bg-paper">
             <ZoneMap
               addresses={addresses}
-              mode={mode}
               now={now}
               focusId={focusId}
               onSelect={setFocusId}
             />
 
             <div className="pointer-events-none absolute inset-x-0 top-0 z-[500] flex flex-wrap items-start justify-between gap-2 p-3">
-              <Legend mode={mode} />
-              <div className="pointer-events-auto flex rounded-lg border border-paper-rule bg-paper-card/95 p-0.5 shadow-[0_12px_28px_-18px_rgba(43,29,18,.6)] backdrop-blur">
-                {(['buildings', 'zones'] as MapMode[]).map((m) => (
-                  <button
-                    key={m}
-                    type="button"
-                    onClick={() => setMode(m)}
-                    aria-pressed={mode === m}
-                    className={`rounded-md px-3 py-1.5 font-mono text-[11px] font-medium uppercase tracking-[0.12em] transition-colors ${
-                      mode === m
-                        ? 'bg-paper-ink text-paper-card'
-                        : 'text-paper-ink-2 hover:text-paper-ink'
-                    }`}
-                  >
-                    {m === 'buildings' ? 'Buildings' : 'Zones'}
-                  </button>
-                ))}
-              </div>
+              <Legend />
             </div>
           </div>
 
@@ -223,26 +189,31 @@ function StatTile({
   );
 }
 
-const LEGEND_ITEMS: { urgency: Urgency; label: string }[] = [
-  { urgency: 'critical', label: 'Refused' },
-  { urgency: 'high', label: 'Unknown / no answer' },
-  { urgency: 'watch', label: 'Stale or evacuating' },
-  { urgency: 'clear', label: 'Cleared' },
+/** What each house colour means (docs/sql/house_colors.sql; priority.ts draws the same five). */
+const HOUSE_LEGEND_ITEMS: { color: HouseColor; label: string }[] = [
+  { color: 'red', label: 'Refused, or a caller needs a person' },
+  { color: 'orange', label: 'No answer at the door' },
+  { color: 'yellow', label: 'Evacuating' },
+  { color: 'green', label: 'Cleared in the last 2 hours' },
+  { color: 'grey', label: 'Unknown, or the clear is stale' },
 ];
 
-/** Key for the map. Labels every colour rather than relying on hue alone. */
-function Legend({ mode }: { mode: MapMode }) {
+/**
+ * Key for the map. Labels every colour rather than relying on hue alone. The map draws the
+ * five house colours (Supabase's, or the same rule worked out locally).
+ */
+function Legend() {
   return (
     <div className="pointer-events-auto w-48 rounded-lg border border-paper-rule bg-paper-card/95 px-3 py-2.5 shadow-[0_12px_28px_-16px_rgba(43,29,18,.5)] backdrop-blur sm:w-56">
-      <div className="eyebrow">{mode === 'buildings' ? 'Evacuation status' : 'Zone priority'}</div>
+      <div className="eyebrow">Evacuation status</div>
 
       <ul className="mt-2 grid gap-1">
-        {LEGEND_ITEMS.map((i) => (
-          <li key={i.urgency} className="flex items-center gap-2 text-[11px] text-paper-ink-2">
+        {HOUSE_LEGEND_ITEMS.map((i) => (
+          <li key={i.color} className="flex items-center gap-2 text-[11px] text-paper-ink-2">
             <span
               aria-hidden
               className="inline-block h-2.5 w-2.5 shrink-0 rounded-full ring-1 ring-paper"
-              style={{ background: URGENCY_COLOR[i.urgency] }}
+              style={{ background: HOUSE_COLOR[i.color] }}
             />
             {i.label}
           </li>
@@ -447,7 +418,7 @@ function DoorKnockPanel({
       <div className="min-h-0 flex-1 overflow-y-auto">
         {knocks.length === 0 ? (
           <p className="px-4 py-8 text-center text-sm text-muted">
-            Every address inside the perimeter is resolved.
+            Nothing to follow up. Houses with no record yet are grey on the map.
           </p>
         ) : (
           <ul className="divide-y divide-line">
@@ -489,104 +460,5 @@ function DoorKnockPanel({
         )}
       </div>
     </section>
-  );
-}
-
-/**
- * Demo fallback for when the phone line isn't up. Each case is one row from the routing
- * table in docs/DATA_CONTRACT.md §3, so the board shows what a real call would show.
- * Rows are injected locally and never written to the backend.
- */
-const DEMO_CALLS: { label: string; row: Omit<CallRow, 'id' | 'call_id' | 'created_at'> }[] = [
-  {
-    label: 'Worried relative, cleared address',
-    row: {
-      mode: 'wildfire',
-      address: '1420 Sunset Mesa Dr',
-      subject_name: 'Maria Lopez',
-      address_id: 'a1',
-      routing: 'answered_by_agent',
-      severity: 1,
-      reason: 'cleared 40 min ago — answered with the time',
-      caller_state: 'worried',
-    },
-  },
-  {
-    label: 'Caller about the refused address',
-    row: {
-      mode: 'wildfire',
-      address: '1515 Via de la Paz',
-      subject_name: 'Harold Kim',
-      address_id: 'a2',
-      routing: 'priority_queue',
-      severity: 4,
-      reason: 'refused, note: 2 adults staying, 1 on oxygen',
-    },
-  },
-  {
-    label: 'First-hand emergency',
-    row: {
-      mode: 'wildfire',
-      address: '16800 Bollinger Dr',
-      subject_name: 'Ruth Adams',
-      address_id: 'a3',
-      routing: 'human_now',
-      severity: 5,
-      reason: 'caller distress: said "please hurry"; agent asked to repeat 2x',
-      bypass: true,
-      caller_state: 'panicked',
-      distress_score: 4,
-    },
-  },
-  {
-    label: 'Routine check (grandma)',
-    row: {
-      mode: 'routine',
-      address: '4512 Crenshaw Blvd',
-      subject_name: 'Dorothy Hayes',
-      // Outside the incident, so it is not on this map — which is the dual-use point.
-      address_id: null,
-      routing: 'priority_queue',
-      severity: 4,
-      reason: 'routine welfare check, score 4 — 5 days, lives alone, mail piling up',
-    },
-  },
-];
-
-function DemoCalls({ onInject }: { onInject: (row: CallRow) => void }) {
-  const [open, setOpen] = useState(false);
-  return (
-    <div className="relative">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        aria-expanded={open}
-        className="rounded-lg border border-line px-2.5 py-1.5 text-xs font-medium text-muted transition-colors hover:bg-panel-2 hover:text-text"
-      >
-        Simulate call
-      </button>
-      {open && (
-        <div className="absolute right-0 top-full z-[600] mt-1.5 w-72 overflow-hidden rounded-xl border border-line bg-panel-2 shadow-2xl">
-          <p className="border-b border-line px-3 py-2 text-xs text-muted">
-            Injects one row locally, for when the phone line is down.
-          </p>
-          {DEMO_CALLS.map((d) => (
-            <button
-              key={d.label}
-              type="button"
-              onClick={() => {
-                const id = crypto.randomUUID();
-                onInject({ ...d.row, id, call_id: id, created_at: new Date().toISOString() });
-                setOpen(false);
-              }}
-              className="block w-full px-3 py-2.5 text-left text-xs transition-colors hover:bg-panel"
-            >
-              <span className="block font-medium">{d.label}</span>
-              <span className="block text-muted">{ROUTING_LABEL[d.row.routing]}</span>
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
   );
 }

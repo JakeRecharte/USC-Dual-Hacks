@@ -75,18 +75,29 @@ describe('door-knock list', () => {
     address({ id: 'fresh', status: 'cleared', recorded_at: minutesAgo(10) }),
     address({ id: 'refused', status: 'refused', recorded_at: minutesAgo(5) }),
     address({ id: 'never', status: 'unknown' }),
+    address({ id: 'asked', status: 'unknown', recorded_at: minutesAgo(30) }),
     address({ id: 'outside', status: 'unknown', inside_perimeter: false }),
     address({ id: 'stale', status: 'cleared', recorded_at: minutesAgo(400) }),
   ];
 
-  it('leaves out resolved addresses and anything outside the perimeter', () => {
+  it('leaves out resolved addresses, anything outside the perimeter, and houses with no record', () => {
     const ids = doorKnockList(rows, NOW).map((a) => a.id);
-    assert.deepEqual(ids, ['refused', 'never', 'stale']);
+    assert.deepEqual(ids, ['refused', 'asked', 'stale']);
   });
 
-  it('puts the never-contacted address above the stale one', () => {
+  it('puts the unanswered address above the stale one', () => {
     const ids = doorKnockList(rows, NOW).map((a) => a.id);
-    assert.ok(ids.indexOf('never') < ids.indexOf('stale'));
+    assert.ok(ids.indexOf('asked') < ids.indexOf('stale'));
+  });
+
+  it('is empty when nothing has been recorded yet', () => {
+    const fresh = [address({ id: 'a' }), address({ id: 'b' })];
+    assert.deepEqual(doorKnockList(fresh, NOW), []);
+  });
+
+  it('keeps a no-record house that Supabase has coloured, such as a caller who needs a person', () => {
+    const flagged = [address({ id: 'caller', status: 'unknown', color: 'red' })];
+    assert.deepEqual(doorKnockList(flagged, NOW).map((a) => a.id), ['caller']);
   });
 });
 
@@ -116,20 +127,28 @@ describe('zone rollup', () => {
   });
 });
 
-describe('seed data', () => {
-  const seeded = seedAddresses(NOW);
+describe('placeholder households', () => {
+  const seeded = seedAddresses();
 
-  it('carries the scripted demo cases the voice agent is tested against', () => {
+  it('invents no status, note or damage: every household is unknown and unassessed', () => {
+    assert.ok(seeded.length > 0);
+    for (const a of seeded) {
+      assert.equal(a.status, 'unknown', `${a.id} has a status`);
+      assert.equal(a.source, null);
+      assert.equal(a.note, null);
+      assert.equal(a.recorded_at, null);
+      assert.equal(a.structure, 'unassessed');
+      assert.equal(a.structure_recorded_at, null);
+    }
+  });
+
+  it('keeps the households the voice agent knows by id', () => {
     const byId = new Map(seeded.map((a) => [a.id, a]));
-    assert.equal(byId.get('a1')!.status, 'cleared');
-    assert.equal(urgencyOf(byId.get('a1')!, NOW), 'clear', 'a1 is the fresh clear');
-    assert.equal(byId.get('a2')!.status, 'refused');
-    assert.equal(byId.get('a2')!.note, '2 adults staying, 1 on oxygen');
-    assert.equal(urgencyOf(byId.get('a4')!, NOW), 'watch', 'a4 is the stale clear');
+    assert.equal(byId.get('a1')!.address, '1420 Sunset Mesa Dr');
+    assert.equal(byId.get('a8')!.address, '640 Toyopa Dr');
   });
 
   it('seeds nothing outside the perimeter: the board covers one incident', () => {
-    assert.ok(seeded.length > 0);
     assert.ok(seeded.every((a) => a.inside_perimeter), 'every seeded household is inside');
   });
 
@@ -142,13 +161,5 @@ describe('seed data', () => {
 
   it('places every household on a distinct address', () => {
     assert.equal(new Set(seeded.map((a) => a.address)).size, seeded.length);
-  });
-
-  it('ages relative to the time it is read, so the demo holds all day', () => {
-    const later = NOW + 6 * 60 * 60_000;
-    const a1Now = seedAddresses(NOW).find((a) => a.id === 'a1')!;
-    const a1Later = seedAddresses(later).find((a) => a.id === 'a1')!;
-    assert.equal(urgencyOf(a1Now, NOW), 'clear');
-    assert.equal(urgencyOf(a1Later, later), 'clear');
   });
 });

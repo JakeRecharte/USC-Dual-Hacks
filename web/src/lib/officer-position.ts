@@ -4,24 +4,24 @@
 //
 //   gps        — navigator.geolocation.watchPosition, high accuracy. The default, used
 //                whenever the fix is real and lands inside the perimeter.
-//   simulated  — a walk along demo-walk.ts. Used when GPS is denied, broken, never arrives,
-//                or reports a position nowhere near the incident, and when the demo flag is
-//                set. Never silent: the portal shows a SIMULATED badge whenever this is on.
+//   simulated  — a marker the officer moves by hand (W A S D or the arrow keys). Used when GPS
+//                is denied, broken, never arrives, or reports a position nowhere near the
+//                incident, and when the demo flag is set. It does not move on its own, and it
+//                is never silent: the portal shows a SIMULATED badge whenever this is on.
 //
 // Real GPS wins whenever it is valid, including after a spell of simulation: an officer who
 // grants permission late, or who walks into the perimeter, gets their own position back.
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { DEMO_ANCHOR_ADDRESS, DEMO_WALK_SPEED_MPS, bearing, demoRoute, pointAlong } from './demo-walk';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { LatLng, Located } from './geo';
-import { offsetMetres, pointInPolygon } from './geo';
+import { bearing, nearest, offsetMetres, pointInPolygon } from './geo';
 import { PERIMETER } from './zones';
 
 export type PositionMode = 'gps' | 'simulated';
 
 /**
- * Why the map is showing what it is showing. Every value except `live` and `locating` means
- * the position on screen is simulated.
+ * Why the map is showing what it is showing. Every value except `live` and `locating`
+ * means the position on screen is simulated.
  */
 export type GpsState =
   /** Waiting for the first fix. */
@@ -59,23 +59,10 @@ function demoFlagSet(): boolean {
   return new URLSearchParams(window.location.search).get('demo') === '1';
 }
 
-/** How often the simulated officer takes a step. Roughly a GPS tick. */
-const WALK_TICK_MS = 1_000;
-
 /**
- * Who is moving the simulated officer.
- *
- *   auto   — the officer walks the route on their own. The default, and the only option on
- *            a phone, where there is no keyboard.
- *   manual — the arrow keys or WASD drive them. The first key press takes control, so a
- *            presenter can walk to the house they want to talk about instead of waiting.
- */
-export type SimControl = 'auto' | 'manual';
-
-/**
- * Driving speed, metres per second. A real officer walks at 1.25 m/s, which is honest and
- * useless on stage: the households here sit a median 41 m apart, so a door would be half a
- * minute of holding an arrow key. This is demo pace, not a claim about walking.
+ * Driving speed, metres per second. The households here sit a median 41 m apart, so a real
+ * walking pace would be half a minute of holding an arrow key per door. This is a pace for
+ * moving a marker, not a claim about walking.
  */
 const DRIVE_SPEED_MPS = 7;
 
@@ -95,7 +82,7 @@ const KEY_VECTORS: Record<string, [north: number, east: number]> = {
 const GEO_OPTIONS: PositionOptions = {
   enableHighAccuracy: true,
   // Long enough for a cold fix outdoors, short enough that a dead GPS does not hold the
-  // screen hostage: on timeout the walk takes over and the officer still has a map.
+  // screen hostage: on timeout the marker takes over and the officer still has a map.
   timeout: 10_000,
   maximumAge: 2_000,
 };
@@ -104,11 +91,6 @@ export function useOfficerPosition(households: readonly Located[]): {
   position: OfficerPosition | null;
   mode: PositionMode;
   gps: GpsState;
-  /** The route the simulated officer is walking, for the map to draw. Empty unless auto. */
-  route: LatLng[];
-  /** Who is driving the simulated officer, and a way to hand control back and forth. */
-  control: SimControl;
-  setControl: (next: SimControl) => void;
 } {
   const [fix, setFix] = useState<OfficerPosition | null>(null);
   const [gps, setGps] = useState<GpsState>(() => (demoFlagSet() ? 'demo' : 'locating'));
@@ -125,7 +107,7 @@ export function useOfficerPosition(households: readonly Located[]): {
         const here: LatLng = [p.coords.latitude, p.coords.longitude];
         if (!pointInPolygon(here, PERIMETER)) {
           // A real, working fix — just not here. Nothing to retry, so stop reporting it as
-          // a failure and let the walk drive the map.
+          // a failure and let the officer move the marker by hand.
           setFix(null);
           setGps('out_of_area');
           return;
@@ -156,56 +138,36 @@ export function useOfficerPosition(households: readonly Located[]): {
 
   const mode: PositionMode = gps === 'live' && fix ? 'gps' : 'simulated';
 
-  // The route is built once per household set, not per render. `households` is a fresh
-  // array on every status change, and rebuilding the walk from it would restart the officer
-  // mid-block every time a door is marked.
+  // Where the marker first appears: the household nearest the middle of the loaded set, so
+  // there are always doors in range. Chosen once per household set, not per render —
+  // `households` is a fresh array on every status change, and restarting the marker mid-block
+  // every time a door is marked would be worse than useless.
   const householdsRef = useRef(households);
   householdsRef.current = households;
-  const route = useMemo(() => {
-    if (mode === 'gps' || households.length === 0) return [];
+  const start = useMemo((): OfficerPosition | null => {
     const all = householdsRef.current;
-    return demoRoute(all, anchorFor(all));
+    if (all.length === 0) return null;
+    const centre: LatLng = [
+      all.reduce((sum, h) => sum + h.lat, 0) / all.length,
+      all.reduce((sum, h) => sum + h.lng, 0) / all.length,
+    ];
+    const [closest] = nearest(all, centre, 1);
+    const at = closest ? closest.item : all[0];
+    return { lat: at.lat, lng: at.lng, accuracy: null, heading: null };
     // Keyed on the count, not the array: household coordinates never change, only statuses.
-  }, [mode, households.length]);
-
-  const [control, setControl] = useState<SimControl>('auto');
-  const [walked, setWalked] = useState(0);
-  // How far along the route the walk had got, so pausing for the keyboard does not lose it.
-  const walkedRef = useRef(0);
-  walkedRef.current = walked;
-  const walking = mode === 'simulated' && route.length > 1;
-  // The walk's clock keeps its own time so a re-render does not reset the officer's progress.
-  const startRef = useRef<number | null>(null);
-
-  // The automatic walk. Paused, not reset, while the keyboard has control, so handing
-  // control back picks up from the same point on the route rather than teleporting.
-  useEffect(() => {
-    if (!walking || control !== 'auto') return;
-    startRef.current = Date.now() - (walkedRef.current / DEMO_WALK_SPEED_MPS) * 1000;
-    const step = () => {
-      const start = startRef.current;
-      if (start != null) setWalked(((Date.now() - start) / 1000) * DEMO_WALK_SPEED_MPS);
-    };
-    step();
-    const timer = setInterval(step, WALK_TICK_MS);
-    return () => clearInterval(timer);
-  }, [walking, control]);
-
-  const auto = useMemo(() => {
-    if (!walking) return null;
-    const p = pointAlong(route, walked);
-    return p ? { lat: p.lat, lng: p.lng, accuracy: null, heading: p.heading } : null;
-  }, [walking, route, walked]);
-
-  // --- Keyboard driving ---
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [households.length]);
 
   const [driven, setDriven] = useState<OfficerPosition | null>(null);
-  // The frame loop reads these rather than closing over state, so it never restarts.
+  // The frame loop reads this rather than closing over state, so it never restarts.
   const drivenRef = useRef<OfficerPosition | null>(null);
   drivenRef.current = driven;
-  const autoRef = useRef(auto);
-  autoRef.current = auto;
   const keys = useRef(new Set<string>());
+
+  // Put the marker down once there is somewhere to put it.
+  useEffect(() => {
+    if (mode === 'simulated' && !drivenRef.current && start) setDriven({ ...start });
+  }, [mode, start]);
 
   useEffect(() => {
     if (mode !== 'simulated') return;
@@ -221,7 +183,7 @@ export function useOfficerPosition(households: readonly Located[]): {
       // Never steal a key from the note field, and never from a browser shortcut.
       if (typing(e.target) || e.metaKey || e.ctrlKey || e.altKey) return;
       const key = e.key.toLowerCase();
-      // Shift only ever modifies a movement key, so it never takes control on its own.
+      // Shift only ever modifies a movement key, so it never moves the marker on its own.
       if (key === 'shift') {
         held.add('shift');
         return;
@@ -230,16 +192,9 @@ export function useOfficerPosition(households: readonly Located[]): {
       // Arrow keys would otherwise scroll the bottom sheet under the officer's thumb.
       e.preventDefault();
       held.add(key);
-      // The first press takes the wheel, starting wherever the walk had got to.
-      setControl((c) => {
-        if (c === 'manual') return c;
-        const from = drivenRef.current ?? autoRef.current;
-        if (from) setDriven({ ...from });
-        return 'manual';
-      });
     };
     const up = (e: KeyboardEvent) => held.delete(e.key.toLowerCase());
-    // A tab-away leaves keys stuck down otherwise, and the officer walks off on their own.
+    // A tab-away leaves keys stuck down otherwise, and the marker drifts off on its own.
     const clear = () => held.clear();
 
     window.addEventListener('keydown', down);
@@ -254,7 +209,7 @@ export function useOfficerPosition(households: readonly Located[]): {
   }, [mode]);
 
   useEffect(() => {
-    if (mode !== 'simulated' || control !== 'manual') return;
+    if (mode !== 'simulated') return;
 
     let frame = 0;
     let last = performance.now();
@@ -282,7 +237,7 @@ export function useOfficerPosition(households: readonly Located[]): {
       if (!from) return;
       const next = offsetMetres([from.lat, from.lng], (north / length) * speed, (east / length) * speed);
 
-      // The data stops at the perimeter, so the officer does too. Walking out of it would
+      // The data stops at the perimeter, so the marker does too. Moving out of it would
       // leave an empty map and no way to tell that is why.
       if (!pointInPolygon(next, PERIMETER)) return;
 
@@ -301,42 +256,11 @@ export function useOfficerPosition(households: readonly Located[]): {
 
     frame = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(frame);
-  }, [mode, control]);
-
-  const simulated = control === 'manual' ? driven : auto;
-
-  /** Hand driving to the keyboard or back to the route, from the current position. */
-  const handControl = useCallback((next: SimControl) => {
-    setControl((current) => {
-      if (current === next) return current;
-      if (next === 'manual') {
-        const from = drivenRef.current ?? autoRef.current;
-        if (from) setDriven({ ...from });
-      }
-      return next;
-    });
-  }, []);
+  }, [mode]);
 
   return {
-    position: mode === 'gps' ? fix : simulated,
+    position: mode === 'gps' ? fix : driven,
     mode,
     gps,
-    // Under manual control the dotted route is noise: the officer is not following it.
-    route: mode === 'gps' || control === 'manual' ? [] : route,
-    control,
-    setControl: handControl,
   };
-}
-
-/**
- * Where the simulated walk begins: the household docs/DEMO_SCRIPT.md taps in beat 2, so the
- * demo opens on the house the script is about. If the board has not loaded that address, any
- * real household is better than a guessed coordinate.
- */
-function anchorFor(households: readonly Located[]): LatLng {
-  const named = households.find(
-    (h) => (h as { address?: string }).address === DEMO_ANCHOR_ADDRESS,
-  );
-  const pick = named ?? households[0];
-  return [pick.lat, pick.lng];
 }

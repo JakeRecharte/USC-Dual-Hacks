@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { fetchAll, withColors } from '../src/lib/supabase-data.ts';
-import { HOUSE_COLOR, URGENCY_COLOR } from '../src/lib/priority.ts';
+import { HOUSE_COLOR, URGENCY_COLOR, houseColor } from '../src/lib/priority.ts';
 import { headline } from '../src/lib/house-events.ts';
 import type { AddressState } from '../src/lib/types.ts';
 
@@ -35,9 +35,23 @@ test('withColors attaches Supabase colours and ignores anything outside green/ye
   assert.equal(out[2].color, undefined);
 });
 
+test('grey is a Supabase colour, drawn in the existing slate', () => {
+  const out = withColors([house('a')], [{ id: 'a', color: 'grey', color_reason: 'no verified record' }]);
+  assert.equal(out[0].color, 'grey');
+  assert.equal(out[0].color_reason, 'no verified record');
+  assert.equal(HOUSE_COLOR.grey, URGENCY_COLOR.watch);
+});
+
 test('red and green reuse the validated urgency colours', () => {
   assert.equal(HOUSE_COLOR.red, URGENCY_COLOR.critical);
   assert.equal(HOUSE_COLOR.green, URGENCY_COLOR.clear);
+});
+
+test('a Retell alert can start from grey', () => {
+  assert.equal(headline({ address: '16800 Bollinger Dr', color: 'red', previous_color: 'grey', first_call: false }),
+    'Retell changed 16800 Bollinger Dr: GREY → RED');
+  assert.equal(headline({ address: '16800 Bollinger Dr', color: 'grey', previous_color: null, first_call: true }),
+    'Retell registered 16800 Bollinger Dr as GREY');
 });
 
 test('alert headlines say what Retell did to the house', () => {
@@ -45,4 +59,36 @@ test('alert headlines say what Retell did to the house', () => {
     'Retell registered 1515 Via de la Paz as RED');
   assert.equal(headline({ address: '1515 Via de la Paz', color: 'red', previous_color: 'yellow', first_call: false }),
     'Retell changed 1515 Via de la Paz: YELLOW → RED');
+});
+
+const NOW = Date.parse('2026-10-17T12:00:00Z');
+const ago = (m: number) => new Date(NOW - m * 60_000).toISOString();
+
+test('five distinct colours: refused red, no answer orange, evacuating yellow, cleared green, unknown grey', () => {
+  const at = (status: AddressState['status'], recorded: string | null) => houseColor({ ...house('x'), status, recorded_at: recorded }, NOW);
+  assert.equal(at('refused', ago(5)), 'red');
+  assert.equal(at('no_answer', ago(5)), 'orange');
+  assert.equal(at('in_transit', ago(5)), 'yellow');
+  assert.equal(at('cleared', ago(5)), 'green');
+  assert.equal(at('self_out', ago(5)), 'green');
+  assert.equal(at('unknown', null), 'grey');
+  assert.equal(new Set(Object.values(HOUSE_COLOR)).size, 5);
+});
+
+test('a clear older than two hours is grey, not green', () => {
+  assert.equal(houseColor({ ...house('x'), status: 'cleared', recorded_at: ago(119) }, NOW), 'green');
+  assert.equal(houseColor({ ...house('x'), status: 'cleared', recorded_at: ago(121) }, NOW), 'grey');
+  assert.equal(houseColor({ ...house('x'), status: 'self_out', recorded_at: null }, NOW), 'grey');
+});
+
+test('Supabase wins over the local rule, so a Retell call can colour a house the status cannot', () => {
+  assert.equal(houseColor({ ...house('x'), status: 'unknown', color: 'red' }, NOW), 'red');
+  assert.equal(houseColor({ ...house('x'), status: 'cleared', recorded_at: ago(5), color: 'orange' }, NOW), 'orange');
+});
+
+test('orange and yellow are valid Supabase colours', () => {
+  const out = withColors([house('a'), house('b')], [{ id: 'a', color: 'orange', color_reason: 'last knock got no answer' }, { id: 'b', color: 'yellow', color_reason: null }]);
+  assert.equal(out[0].color, 'orange');
+  assert.equal(out[1].color, 'yellow');
+  assert.equal(headline({ address: '1 A St', color: 'orange', previous_color: 'grey', first_call: false }), 'Retell changed 1 A St: GREY → ORANGE');
 });

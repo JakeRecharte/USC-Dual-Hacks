@@ -6,8 +6,8 @@
 // subscribers over SSE.
 //
 // It is deliberately the ONLY place that writes status. When P2's `update_status` is live,
-// set BACKEND_URL and `applyUpdate` forwards there too; swap `seedAddresses()` for a
-// Supabase read and the portals are unchanged.
+// set BACKEND_URL and `applyUpdate` forwards there too. Only used when no database is
+// configured (memory mode): `seedAddresses()` is the household list, every one unknown.
 import { EventEmitter } from 'node:events';
 import { seedAddresses } from './addresses';
 import type { AddressState, Source, Status, Structure } from './types';
@@ -25,7 +25,6 @@ export interface StatusUpdate {
 interface Store {
   addresses: Map<string, AddressState>;
   bus: EventEmitter;
-  seededAt: number;
 }
 
 // Next's dev server re-evaluates modules on edit; without this the board resets mid-demo.
@@ -37,7 +36,6 @@ function create(): Store {
   return {
     addresses: new Map(seedAddresses().map((a) => [a.id, a])),
     bus,
-    seededAt: Date.now(),
   };
 }
 
@@ -82,15 +80,6 @@ export function applyUpdate(update: StatusUpdate): AddressState | null {
   bus.emit('status', next);
   void forwardToBackend(update, at);
   return next;
-}
-
-/** Puts the fake data back. The reset button on the board, before every demo run. */
-export function resetStore(): AddressState[] {
-  store.addresses = new Map(seedAddresses().map((a) => [a.id, a]));
-  store.seededAt = Date.now();
-  const rows = allAddresses();
-  bus.emit('reset', rows);
-  return rows;
 }
 
 /**

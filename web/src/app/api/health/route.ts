@@ -80,6 +80,25 @@ async function probeDatabase(): Promise<Record<string, unknown>> {
     ? { ok: false, error: structure.error.message }
     : { ok: true };
 
+  // The per-house colour Retell and the officers both drive (docs/sql/house_colors.sql). Missing
+  // before that SQL runs, and the board then silently keeps its own status colours.
+  const colors = await client.from('houses').select('id, color', { count: 'exact', head: true });
+  out.houses_color = colors.error
+    ? { ok: false, error: colors.error.message, fix: 'run docs/sql/houses.sql then docs/sql/house_colors.sql' }
+    : { ok: true, rows: colors.count };
+
+  const events = await client.from('house_events').select('id', { count: 'exact', head: true });
+  out.house_events = events.error
+    ? { ok: false, error: events.error.message, fix: 'run docs/sql/house_colors.sql' }
+    : { ok: true, rows: events.count };
+
+  // Rows the phone line has written. Zero after a real call means the telephony server is
+  // pointed at a different Supabase project than this one.
+  const calls = await client.from('calls').select('id', { count: 'exact', head: true });
+  out.calls = calls.error
+    ? { ok: false, error: calls.error.message }
+    : { ok: true, rows: calls.count };
+
   return out;
 }
 

@@ -11,7 +11,7 @@ export interface HouseEvent {
   created_at: string;
 }
 
-const LABEL: Record<HouseColor, string> = { red: 'RED', yellow: 'YELLOW', green: 'GREEN' };
+const LABEL: Record<HouseColor, string> = { red: 'RED', orange: 'ORANGE', yellow: 'YELLOW', green: 'GREEN', grey: 'GREY' };
 
 /** One line for the alert: what Retell did to the house. */
 export function headline(e: Pick<HouseEvent, 'address' | 'color' | 'previous_color' | 'first_call'>): string {

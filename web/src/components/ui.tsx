@@ -92,26 +92,3 @@ export function SignOutButton() {
     </button>
   );
 }
-
-/** Puts the fake data back between demo runs. */
-export function ResetButton({ onReset }: { onReset?: () => void }) {
-  const [busy, setBusy] = useState(false);
-  return (
-    <button
-      type="button"
-      disabled={busy}
-      onClick={async () => {
-        setBusy(true);
-        try {
-          await fetch('/api/reset', { method: 'POST' });
-          onReset?.();
-        } finally {
-          setBusy(false);
-        }
-      }}
-      className="rounded-lg border border-line px-2.5 py-1.5 text-xs font-medium text-muted transition-colors hover:bg-panel-2 hover:text-text disabled:opacity-50"
-    >
-      {busy ? 'Resetting…' : 'Reset demo data'}
-    </button>
-  );
-}

@@ -43,9 +43,7 @@ export async function GET(req: Request) {
       send('snapshot', { addresses: allAddresses(), now: Date.now() });
 
       const onStatus = (row: AddressState) => send('status', { address: row, now: Date.now() });
-      const onReset = (rows: AddressState[]) => send('snapshot', { addresses: rows, now: Date.now() });
       bus.on('status', onStatus);
-      bus.on('reset', onReset);
 
       // Proxies drop idle streams; a comment line keeps it alive.
       const ping = setInterval(() => {
@@ -64,7 +62,6 @@ export async function GET(req: Request) {
         clearInterval(ping);
         clearTimeout(lifetime);
         bus.off('status', onStatus);
-        bus.off('reset', onReset);
         try {
           controller.close();
         } catch {

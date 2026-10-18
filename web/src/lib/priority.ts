@@ -45,15 +45,42 @@ export const STATUS_COLOR: Record<Status, string> = {
 };
 
 /**
- * Supabase's green / yellow / red (houses.color). Red and green reuse the validated urgency
- * steps; yellow is a dark ochre that holds 3:1 against the paper ground. When a house has a
- * Supabase colour it wins; otherwise the map falls back to its own status colours.
+ * The five house colours (houses.color, docs/sql/house_colors.sql). Red, green and grey reuse
+ * the validated urgency steps (grey is the slate: "nobody has current word from this house").
+ * Orange and yellow are new, picked so that all five hold 3:1 against the #f4efe6 paper ground
+ * and stay at least ΔE 10 apart (CIEDE2000) even under deuteranopia and protanopia. The old
+ * amber and ochre were ΔE 0.5 apart for a deuteranope. Every use also carries a text label.
  */
 export const HOUSE_COLOR: Record<HouseColor, string> = {
-  red: URGENCY_COLOR.critical,
-  yellow: '#a87c12',
-  green: URGENCY_COLOR.clear,
+  red: URGENCY_COLOR.critical, // refused, or a caller needs a person
+  orange: '#b8440a', //           no answer at the door
+  yellow: '#b37f05', //           evacuating
+  green: URGENCY_COLOR.clear, //  cleared within 2 hours
+  grey: URGENCY_COLOR.watch, //   unknown, or the clear has gone stale
 };
+
+/**
+ * The colour to draw for a house: Supabase's when it has supplied one, otherwise the same rule
+ * worked out here from the status (house_color() in docs/sql/house_colors.sql, minus the Retell
+ * calls it cannot see). The fallback is what the mock version and a project that has not run
+ * house_colors.sql show, so the map and its legend describe one scheme in every mode.
+ */
+export function houseColor(a: AddressState, now: number): HouseColor {
+  if (a.color) return a.color;
+  switch (a.status) {
+    case 'refused':
+      return 'red';
+    case 'no_answer':
+      return 'orange';
+    case 'in_transit':
+      return 'yellow';
+    case 'cleared':
+    case 'self_out':
+      return isStale(a.status, a.recorded_at, now) ? 'grey' : 'green';
+    default:
+      return 'grey';
+  }
+}
 
 export function ageMinutes(recordedAt: string | null, now: number): number {
   if (!recordedAt) return Infinity;
@@ -98,10 +125,20 @@ export function relativeMinutes(minutes: number): string {
   return `${Math.floor(hours / 24)}d ago`;
 }
 
-/** Officers knock on these: anything unresolved inside the perimeter, worst first. */
+/**
+ * Officers knock on these: houses inside the perimeter with a record that still needs a
+ * person, worst first. A household nobody has any record for is left off. Every one of them
+ * is in that state until the first call or tap, so listing them buries the ones that matter
+ * under thousands of placeholders; the map still draws them grey and the board counts them.
+ */
 export function doorKnockList(addresses: AddressState[], now: number): AddressState[] {
   return addresses
-    .filter((a) => a.inside_perimeter && URGENCY_RANK[urgencyOf(a, now)] <= URGENCY_RANK.watch)
+    .filter(
+      (a) =>
+        a.inside_perimeter &&
+        URGENCY_RANK[urgencyOf(a, now)] <= URGENCY_RANK.watch &&
+        (a.recorded_at !== null || houseColor(a, now) !== 'grey'),
+    )
     .sort(sortByUrgency(now));
 }
 
