@@ -12,7 +12,8 @@
     "deploy": "cd .. && railway up --ci -p e4a0f795-23e0-45f4-bb91-54dfd4f40a73 -e production -s USC-Dual-Hacks -m \"$(git rev-parse --short HEAD)\"",
     "reset-demo": "node scripts/reset-demo.js && node scripts/apply-threat.js",
     "eval-agent": "node scripts/eval-agent.js",
-    "apply-threat": "node scripts/apply-threat.js"
+    "apply-threat": "node scripts/apply-threat.js",
+    "demo-colors": "node scripts/demo-colors.js"
   },
   "keywords": [],
   "author": "",
