@@ -86,7 +86,7 @@ export function SignOutButton() {
         await fetch('/api/session', { method: 'DELETE' });
         router.replace('/');
       }}
-      className="rounded-lg border border-line px-2.5 py-1.5 text-xs font-medium text-muted transition-colors hover:bg-panel-2 hover:text-text disabled:opacity-50"
+      className="border border-line px-3 py-1.5 text-xs font-medium text-muted transition-colors hover:border-text hover:text-text disabled:opacity-50"
     >
       Sign out
     </button>
@@ -109,7 +109,7 @@ export function ResetButton({ onReset }: { onReset?: () => void }) {
           setBusy(false);
         }
       }}
-      className="rounded-lg border border-line px-2.5 py-1.5 text-xs font-medium text-muted transition-colors hover:bg-panel-2 hover:text-text disabled:opacity-50"
+      className="border border-line px-3 py-1.5 text-xs font-medium text-muted transition-colors hover:border-text hover:text-text disabled:opacity-50"
     >
       {busy ? 'Resetting…' : 'Reset demo data'}
     </button>

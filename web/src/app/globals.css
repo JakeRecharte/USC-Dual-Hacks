@@ -83,6 +83,36 @@ body {
   --color-paper-accent: var(--paper-accent);
 }
 
+/*
+ * Dispatch and sign-in sit on the map's paper instead of a dark slate shell, so the console
+ * reads as one surface. Scoped by class: the officer portal keeps the dark theme it was
+ * tuned for on a phone at night. Status colours switch to the paper-validated set in
+ * lib/priority.ts (URGENCY_COLOR), because the neon dark-theme ones wash out on paper.
+ */
+.paper-console {
+  --bg: #efe8dc;
+  --panel: #fbf8f2;
+  --panel-2: #f4efe6;
+  --line: #ddd4c5;
+  --text: #1f1a14;
+  --muted: #6f665a;
+  --critical: #9b2c1f;
+  --high: #bf6a12;
+  --watch: #8a6a10;
+  --clear: #2f6b4f;
+  --info: #1f1a14;
+  color-scheme: light;
+  background: var(--bg);
+  color: var(--text);
+}
+
+/* Tabular figures for every count and clock on the console. */
+.figure {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+
 /* Mono uppercase label, the eyebrow from the reference. */
 .eyebrow {
   font: 500 11px/1.2 var(--font-mono);

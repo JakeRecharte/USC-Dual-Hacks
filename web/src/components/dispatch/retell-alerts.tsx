@@ -43,7 +43,7 @@ export function RetellAlerts() {
   return (
     <div className="pointer-events-none fixed right-4 top-4 z-50 flex w-[360px] max-w-[calc(100vw-2rem)] flex-col gap-2" aria-live="polite">
       {events.map((e) => (
-        <div key={e.id} role="status" className="pointer-events-auto rounded-xl border border-line bg-panel px-3.5 py-3 shadow-lg">
+        <div key={e.id} role="status" className="pointer-events-auto border border-l-[3px] border-line bg-panel px-3.5 py-3 shadow-[0_18px_40px_-20px_rgba(43,29,18,.55)]" style={{ borderLeftColor: HOUSE_COLOR[e.color] }}>
           <div className="flex items-start gap-2.5">
             <span className="mt-1 h-3 w-3 shrink-0 rounded-full" style={{ background: HOUSE_COLOR[e.color] }} aria-hidden />
             <div className="min-w-0 flex-1">

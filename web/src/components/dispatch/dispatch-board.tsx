@@ -13,7 +13,6 @@ import {
   relativeMinutes,
   ageMinutes,
   urgencyOf,
-  zoneSummaries,
   type Urgency,
 } from '@/lib/priority';
 import { CALLER_STATE_LABEL, DISTRESS_THRESHOLD, ROUTING_LABEL, ROUTING_RANK } from '@/lib/types';
@@ -43,7 +42,6 @@ export function DispatchBoard() {
 
   const inPerimeter = useMemo(() => addresses.filter((a) => a.inside_perimeter), [addresses]);
   const knocks = useMemo(() => doorKnockList(addresses, now), [addresses, now]);
-  const zones = useMemo(() => zoneSummaries(inPerimeter, now), [inPerimeter, now]);
 
   const stats = useMemo(() => {
     const counts: Record<Urgency, number> = { critical: 0, high: 0, watch: 0, clear: 0 };
@@ -71,43 +69,39 @@ export function DispatchBoard() {
   );
 
   return (
-    <div className="flex min-h-dvh flex-col">
-      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-4 py-3">
-        <div className="flex min-w-0 items-center gap-2.5">
-          <span aria-hidden className="h-6 w-1.5 shrink-0 rounded-full bg-critical" />
-          <div className="min-w-0">
-            <h1 className="text-base font-semibold leading-tight tracking-tight">
-              Dispatch — Palisades incident
-            </h1>
-            <p className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-muted">
-              <ConnectionDot
-                state={connection}
-                label={`${dataMode === 'supabase' ? 'Database' : 'Status feed'} ${connection}`}
-              />
-              <ConnectionDot
-                state={callFeed}
-                label={telephonyConfigured ? `Call feed ${callFeed}` : 'Call feed not configured'}
-              />
-              {dataMode === 'memory' && (
-                <span className="text-watch">in-memory — not shared across servers</span>
-              )}
-            </p>
-          </div>
+    <div className="paper-console flex min-h-dvh flex-col">
+      <header className="flex flex-wrap items-end justify-between gap-x-6 gap-y-3 border-b border-line bg-panel px-5 pb-3 pt-4">
+        <div className="min-w-0">
+          <p className="eyebrow-dark">LA Community Line · Dispatch</p>
+          <h1 className="display mt-1 text-[28px] leading-none">Palisades Fire</h1>
         </div>
-        <div className="flex items-center gap-2">
-          <DemoCalls onInject={upsert} />
-          <ResetButton />
-          <SignOutButton />
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
+          <p className="flex flex-wrap items-center gap-x-4 gap-y-1">
+            <ConnectionDot
+              state={connection}
+              label={`${dataMode === 'supabase' ? 'Records' : 'Records (local)'} ${connection}`}
+            />
+            <ConnectionDot
+              state={callFeed}
+              label={telephonyConfigured ? `Phone line ${callFeed}` : 'Phone line not connected'}
+            />
+          </p>
+          <Clock now={now} />
+          <div className="flex items-center gap-1.5">
+            <DemoCalls onInject={upsert} />
+            <ResetButton />
+            <SignOutButton />
+          </div>
         </div>
       </header>
 
       {error && (
-        <p role="alert" className="mx-4 mt-4 rounded-xl border border-critical/40 bg-critical/10 px-3.5 py-2.5 text-xs leading-relaxed text-critical">
+        <p role="alert" className="mx-5 mt-4 border-l-2 border-critical bg-critical/10 px-3.5 py-2.5 text-xs leading-relaxed text-critical">
           {error}
         </p>
       )}
       {!gated && (
-        <p className="mx-4 mt-4 rounded-xl border border-watch/40 bg-watch/10 px-3.5 py-2.5 text-xs leading-relaxed text-watch">
+        <p className="mx-5 mt-4 border-l-2 border-watch bg-watch/10 px-3.5 py-2.5 text-xs leading-relaxed text-watch">
           Database reads are not behind the shift code: SUPABASE_JWT_SECRET is not set, so the
           anon key alone can read resident names. Set it before this is reachable publicly —
           see docs/SUPABASE_SETUP.md.
@@ -116,32 +110,22 @@ export function DispatchBoard() {
 
       <RetellAlerts />
 
-      <div className="grid flex-1 gap-4 p-4 lg:grid-cols-[minmax(0,1fr)_380px]">
+      <div className="grid flex-1 gap-5 p-5 lg:grid-cols-[minmax(0,1fr)_400px]">
         <section className="flex min-w-0 flex-col gap-4">
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <StatTile
-              label="Unresolved"
+          <dl className="grid grid-cols-2 border border-line bg-panel sm:grid-cols-4">
+            <Tally
+              label="Still open"
               value={stats.unresolved}
               of={stats.total}
               tone="high"
-              hint="inside the perimeter"
+              hint="households inside the perimeter"
             />
-            <StatTile label="Refused" value={stats.refused} tone="critical" hint="people still inside" />
-            <StatTile
-              label="Never contacted"
-              value={stats.neverContacted}
-              tone="high"
-              hint="no record at all"
-            />
-            <StatTile
-              label="Stale clears"
-              value={stats.stale}
-              tone="watch"
-              hint="older than 2 hours"
-            />
-          </div>
+            <Tally label="Refusing to leave" value={stats.refused} tone="critical" hint="people still inside" />
+            <Tally label="Never reached" value={stats.neverContacted} tone="high" hint="no knock, no call" />
+            <Tally label="Clears gone stale" value={stats.stale} tone="watch" hint="last check over 2 hours ago" />
+          </dl>
 
-          <div className="relative min-h-[460px] flex-1 overflow-hidden rounded-2xl border border-line bg-paper">
+          <div className="relative min-h-[460px] flex-1 overflow-hidden border border-line bg-paper">
             <ZoneMap
               addresses={addresses}
               mode={mode}
@@ -171,8 +155,6 @@ export function DispatchBoard() {
               </div>
             </div>
           </div>
-
-          <ZoneStrip zones={zones} />
         </section>
 
         {/* On wide screens the sidebar takes its height from the map column instead of setting
@@ -194,8 +176,18 @@ const TONE_VAR: Record<'critical' | 'high' | 'watch' | 'clear', string> = {
   clear: 'var(--clear)',
 };
 
-/** A hero number, not a chart: one value, its label, and what it counts. */
-function StatTile({
+/** Wall-clock time: dispatchers log against it and read every age on the board from it. */
+function Clock({ now }: { now: number }) {
+  const t = new Date(now);
+  return (
+    <time dateTime={t.toISOString()} className="figure text-sm text-muted" suppressHydrationWarning>
+      {t.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false })}
+    </time>
+  );
+}
+
+/** One count in the tally row: the number, what it counts, and the bar of colour that keys it to the map. */
+function Tally({
   label,
   value,
   of,
@@ -209,16 +201,16 @@ function StatTile({
   hint: string;
 }) {
   return (
-    <div className="rounded-xl border border-line bg-panel p-3.5">
-      <div className="flex items-center gap-1.5">
-        <span aria-hidden className="h-2 w-2 shrink-0 rounded-full" style={{ background: TONE_VAR[tone] }} />
-        <p className="truncate text-xs font-semibold uppercase tracking-wider text-muted">{label}</p>
-      </div>
-      <p className="mt-1.5 font-mono text-3xl font-semibold leading-none tabular-nums">
-        {value}
-        {of !== undefined && <span className="text-lg text-muted">/{of}</span>}
-      </p>
-      <p className="mt-1 truncate text-xs text-muted">{hint}</p>
+    <div className="border-line px-4 py-3 [&:not(:first-child)]:border-l max-sm:[&:nth-child(3)]:border-l-0 max-sm:[&:nth-child(n+3)]:border-t">
+      <dt className="flex items-center gap-2 text-[13px] font-semibold">
+        <span aria-hidden className="h-3 w-1 shrink-0" style={{ background: TONE_VAR[tone] }} />
+        {label}
+      </dt>
+      <dd className="figure mt-1.5 text-[34px] font-medium leading-none">
+        {value.toLocaleString()}
+        {of !== undefined && <span className="text-base text-muted"> of {of.toLocaleString()}</span>}
+      </dd>
+      <dd className="mt-1 truncate text-xs text-muted">{hint}</dd>
     </div>
   );
 }
@@ -260,36 +252,6 @@ function Legend({ mode }: { mode: MapMode }) {
       <p className="mt-1.5 text-[11px] leading-snug text-paper-soft">
         Dashed outline is the active fire perimeter.
       </p>
-    </div>
-  );
-}
-
-function ZoneStrip({ zones }: { zones: ReturnType<typeof zoneSummaries> }) {
-  if (zones.length === 0) return null;
-  return (
-    <div className="scrollbar-none flex gap-3 overflow-x-auto pb-1">
-      {zones.map((z) => (
-        <div
-          key={z.zone_id}
-          className="min-w-[160px] shrink-0 rounded-xl border bg-panel p-3"
-          style={{ borderColor: `${URGENCY_COLOR[z.urgency]}59` }}
-        >
-          <div className="flex items-center justify-between gap-2">
-            <span className="font-mono text-sm font-semibold">{z.zone_id}</span>
-            <span
-              className="rounded px-1.5 py-0.5 text-xs font-semibold"
-              style={{ color: URGENCY_COLOR[z.urgency], background: `${URGENCY_COLOR[z.urgency]}1f` }}
-            >
-              {z.unresolved}/{z.total}
-            </span>
-          </div>
-          <p className="mt-0.5 truncate text-xs text-muted">{ZONE_NAMES[z.zone_id] ?? z.zone_id}</p>
-          <p className="mt-1.5 text-xs text-muted">
-            {z.counts.critical > 0 && <span className="text-critical">{z.counts.critical} refused · </span>}
-            {z.destroyed > 0 ? `${z.destroyed} destroyed` : 'no structure loss'}
-          </p>
-        </div>
-      ))}
     </div>
   );
 }
@@ -362,6 +324,19 @@ function EmotionGauge({ state, score }: { state?: CallerState | null; score?: nu
   );
 }
 
+/** Panel heading shared by the two sidebar lists: what it is, how it is ordered, how many. */
+function PanelHead({ title, order, count }: { title: string; order: string; count: number }) {
+  return (
+    <header className="flex items-end justify-between gap-2 border-b border-line px-4 pb-2.5 pt-3">
+      <div>
+        <h2 className="text-[15px] font-semibold leading-tight">{title}</h2>
+        <p className="text-xs text-muted">{order}</p>
+      </div>
+      <span className="figure text-xl leading-none">{count.toLocaleString()}</span>
+    </header>
+  );
+}
+
 function CallQueue({
   calls,
   now,
@@ -372,47 +347,45 @@ function CallQueue({
   configured: boolean;
 }) {
   return (
-    <section className="flex min-h-0 flex-col rounded-2xl border border-line bg-panel">
-      <header className="flex items-baseline justify-between gap-2 border-b border-line px-4 py-3">
-        <h2 className="text-sm font-semibold">Live call queue</h2>
-        <span className="font-mono text-xs text-muted">{calls.length}</span>
-      </header>
+    <section className="flex min-h-0 flex-col border border-line bg-panel">
+      <PanelHead title="Incoming calls" order="needs a person first, then newest" count={calls.length} />
       <div className="max-h-[42vh] overflow-y-auto">
         {calls.length === 0 ? (
-          <p className="px-4 py-8 text-center text-sm leading-relaxed text-muted">
-            No calls yet.
+          <div className="px-4 py-6 text-sm leading-relaxed text-muted">
+            <p>No calls waiting. When someone calls the line, the call shows up here.</p>
             {!configured && (
-              <>
-                <br />
-                Set NEXT_PUBLIC_TELEPHONY_URL to attach the agent&apos;s feed.
-              </>
+              <p className="mt-2 text-xs">
+                The phone line isn&apos;t connected to this board. Use{' '}
+                <span className="font-medium text-text">Simulate call</span> to try it.
+              </p>
             )}
-          </p>
+          </div>
         ) : (
           <ul className="divide-y divide-line">
             {calls.map((c) => (
-              <li key={c.call_id || c.id} className="px-4 py-3">
-                <div className="flex items-start justify-between gap-2">
-                  <span
-                    className="inline-flex shrink-0 items-center gap-1.5 rounded-md px-2 py-0.5 text-xs font-semibold"
-                    style={{ color: ROUTING_TONE[c.routing], background: `${ROUTING_TONE[c.routing]}1f` }}
-                  >
-                    {c.bypass && <span aria-hidden>⚡</span>}
+              <li
+                key={c.call_id || c.id}
+                className="border-l-[3px] px-4 py-3"
+                style={{ borderLeftColor: ROUTING_TONE[c.routing] }}
+              >
+                <div className="flex items-baseline justify-between gap-2">
+                  <span className="text-xs font-semibold uppercase tracking-wide" style={{ color: ROUTING_TONE[c.routing] }}>
+                    {c.bypass && <span aria-hidden>⚡ </span>}
                     {ROUTING_LABEL[c.routing]}
                   </span>
-                  <span className="shrink-0 font-mono text-xs text-muted">
+                  <span className="figure shrink-0 text-xs text-muted">
                     {c.severity > 0 && `S${c.severity} · `}
                     {relativeMinutes(Math.round(ageMinutes(c.created_at, now)))}
                   </span>
                 </div>
-                <p className="mt-1.5 truncate text-sm font-medium">
+                <p className="mt-1 truncate text-[15px] font-semibold">
                   {c.address || 'Address not given'}
                 </p>
                 <p className="truncate text-xs text-muted">
-                  asking about {c.subject_name || 'an unnamed resident'}
+                  Caller asking about {c.subject_name || 'an unnamed resident'}
                   {c.mode === 'routine' && ' · routine check'}
                 </p>
-                <p className="mt-1 text-xs leading-relaxed text-muted">{c.reason}</p>
+                <p className="mt-1 text-[13px] leading-snug">{c.reason}</p>
                 <EmotionGauge state={c.caller_state} score={c.distress_score} />
               </li>
             ))}
@@ -439,53 +412,54 @@ function DoorKnockPanel({
 }) {
   const shown = knocks.slice(0, LIST_LIMIT);
   return (
-    <section className="flex min-h-0 flex-1 flex-col rounded-2xl border border-line bg-panel">
-      <header className="flex items-baseline justify-between gap-2 border-b border-line px-4 py-3">
-        <h2 className="text-sm font-semibold">Door-knock list</h2>
-        <span className="font-mono text-xs text-muted">{knocks.length}</span>
-      </header>
+    <section className="flex min-h-0 flex-1 flex-col border border-line bg-panel">
+      <PanelHead title="Doors to knock" order="worst first · tap one to find it on the map" count={knocks.length} />
       <div className="min-h-0 flex-1 overflow-y-auto">
         {knocks.length === 0 ? (
           <p className="px-4 py-8 text-center text-sm text-muted">
             Every address inside the perimeter is resolved.
           </p>
         ) : (
-          <ul className="divide-y divide-line">
-            {shown.map((a) => (
+          <ol className="divide-y divide-line">
+            {shown.map((a, i) => (
               <li key={a.id}>
                 <button
                   type="button"
                   onClick={() => onFocus(a.id)}
-                  className={`w-full px-4 py-3 text-left transition-colors hover:bg-panel-2 ${
-                    focusId === a.id ? 'bg-panel-2' : ''
+                  aria-current={focusId === a.id}
+                  className={`grid w-full grid-cols-[2rem_minmax(0,1fr)] gap-x-2 px-4 py-3 text-left transition-colors hover:bg-panel-2 ${
+                    focusId === a.id ? 'bg-panel-2 shadow-[inset_3px_0_0_var(--text)]' : ''
                   }`}
                 >
-                  <div className="flex items-start justify-between gap-2">
-                    <span className="min-w-0 truncate text-sm font-medium">{a.address}</span>
-                    <span className="shrink-0 font-mono text-xs text-muted">{a.zone_id}</span>
-                  </div>
-                  <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-                    <StatusChip status={a.status} urgency={urgencyOf(a, now)} />
-                    <StructureChip structure={a.structure} />
-                    <span className="text-xs text-muted">
-                      {a.recorded_at
-                        ? relativeMinutes(Math.round(ageMinutes(a.recorded_at, now)))
-                        : 'no record'}
+                  <span className="figure pt-0.5 text-sm text-muted">{i + 1}</span>
+                  <span className="min-w-0">
+                    <span className="flex items-baseline justify-between gap-2">
+                      <span className="min-w-0 truncate text-[15px] font-semibold">{a.address}</span>
+                      <span className="figure shrink-0 text-xs text-muted">
+                        {a.recorded_at
+                          ? relativeMinutes(Math.round(ageMinutes(a.recorded_at, now)))
+                          : 'no record'}
+                      </span>
                     </span>
-                  </div>
-                  {a.note && (
-                    <p className="mt-1.5 text-xs leading-relaxed text-muted">{a.note}</p>
-                  )}
+                    <span className="block truncate text-xs text-muted">{ZONE_NAMES[a.zone_id] ?? a.zone_id}</span>
+                    <span className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                      <StatusChip status={a.status} urgency={urgencyOf(a, now)} />
+                      <StructureChip structure={a.structure} />
+                    </span>
+                    {a.note && (
+                      <span className="mt-1.5 block text-[13px] leading-snug">&ldquo;{a.note}&rdquo;</span>
+                    )}
+                  </span>
                 </button>
               </li>
             ))}
             {knocks.length > shown.length && (
               <li className="px-4 py-3 text-xs text-muted">
-                {(knocks.length - shown.length).toLocaleString()} more, worst first. Work the
-                top of the list.
+                {(knocks.length - shown.length).toLocaleString()} more below these. Clear the top
+                of the list first.
               </li>
             )}
-          </ul>
+          </ol>
         )}
       </div>
     </section>
@@ -561,12 +535,12 @@ function DemoCalls({ onInject }: { onInject: (row: CallRow) => void }) {
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
-        className="rounded-lg border border-line px-2.5 py-1.5 text-xs font-medium text-muted transition-colors hover:bg-panel-2 hover:text-text"
+        className="border border-text bg-text px-3 py-1.5 text-xs font-semibold text-panel transition-opacity hover:opacity-85"
       >
         Simulate call
       </button>
       {open && (
-        <div className="absolute right-0 top-full z-[600] mt-1.5 w-72 overflow-hidden rounded-xl border border-line bg-panel-2 shadow-2xl">
+        <div className="absolute right-0 top-full z-[600] mt-1.5 w-72 overflow-hidden border border-line bg-panel shadow-[0_18px_40px_-20px_rgba(43,29,18,.55)]">
           <p className="border-b border-line px-3 py-2 text-xs text-muted">
             Injects one row locally, for when the phone line is down.
           </p>
@@ -579,7 +553,7 @@ function DemoCalls({ onInject }: { onInject: (row: CallRow) => void }) {
                 onInject({ ...d.row, id, call_id: id, created_at: new Date().toISOString() });
                 setOpen(false);
               }}
-              className="block w-full px-3 py-2.5 text-left text-xs transition-colors hover:bg-panel"
+              className="block w-full border-t border-line px-3 py-2.5 text-left text-xs transition-colors hover:bg-panel-2"
             >
               <span className="block font-medium">{d.label}</span>
               <span className="block text-muted">{ROUTING_LABEL[d.row.routing]}</span>
