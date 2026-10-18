@@ -79,6 +79,11 @@ function routeOnFacts(call, lookup, now) {
 
   // A resident calling about themselves is "with them"; their own rules below say what that means.
   const withThem = call.with_them_now && call.reported_by !== 'resident';
+  // With them and they're out: the person is safe beside the caller. That's a report, not an
+  // emergency; sending it to a person turned the house red over the update itself.
+  if (withThem && call.reported_status === 'out' && !call.emergency && !['panicked', 'distressed'].includes(call.caller_state)) {
+    return { routing: 'answered_by_agent', severity: 2, reason: 'caller is with them, out of the area', rule: 'with_them_out' };
+  }
   if (withThem || call.emergency) {
     return { routing: 'human_now', severity: 5,
       reason: withThem ? 'caller is with them now' : (call.emergency_reason || 'emergency'), rule: withThem ? 'with_them_now' : 'emergency' };
@@ -97,6 +102,12 @@ function routeOnFacts(call, lookup, now) {
   // New information beats the record, but only a concrete report of where the person is.
   // Free text alone doesn't escalate: on a real call the agent wrote "caller has not heard
   // from her since the officer check" into caller_update and a fresh "cleared" got queued.
+  // "They got out" is good news the board records; it doesn't need a person on the phone.
+  // (Transferring it to a phone nobody answered made it a call-back, and the house red.)
+  if (call.reported_status === 'out') {
+    return { routing: 'answered_by_agent', severity: 2,
+      reason: `caller report: out${call.caller_update ? ` (${call.caller_update})` : ''}`, rule: 'caller_report_out' };
+  }
   if (call.reported_status) {
     return { routing: 'priority_queue', severity: 4,
       reason: `caller report: ${call.reported_status}${call.caller_update ? ` (${call.caller_update})` : ''}`, rule: 'caller_report' };

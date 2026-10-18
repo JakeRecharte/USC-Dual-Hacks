@@ -3,19 +3,18 @@
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import type { Role } from '@/lib/auth';
+import { Mark } from '@/components/ui';
 
-const PORTALS: { role: Role; title: string; blurb: string; icon: string }[] = [
+const PORTALS: { role: Role; title: string; blurb: string }[] = [
   {
     role: 'officer',
     title: 'Field officer',
     blurb: 'Your assigned addresses, one tap per door.',
-    icon: 'M12 2 3 6v6c0 5 3.8 9.3 9 10 5.2-.7 9-5 9-10V6l-9-4Z',
   },
   {
     role: 'dispatch',
     title: 'Dispatch',
-    blurb: 'Zone priority map and the live call queue.',
-    icon: 'M12 3a9 9 0 0 0-9 9v5a3 3 0 0 0 3 3h2v-7H5v-1a7 7 0 0 1 14 0v1h-3v7h2a3 3 0 0 0 3-3v-5a9 9 0 0 0-9-9Z',
+    blurb: 'The map, incoming calls and the door-knock list.',
   },
 ];
 
@@ -53,104 +52,119 @@ export function SignIn({ next, showHints }: { next?: string; showHints: boolean 
   }
 
   return (
-    <main className="mx-auto flex min-h-dvh w-full max-w-md flex-col justify-center gap-8 px-4 py-10">
-      <header className="space-y-2">
-        <div className="flex items-center gap-2.5">
-          <span aria-hidden className="h-7 w-1.5 rounded-full bg-critical" />
-          <h1 className="text-3xl font-semibold tracking-tight">Line</h1>
-        </div>
-        <p className="text-sm leading-relaxed text-muted">
-          Evacuation welfare checks. Sign in with the code for your shift.
-        </p>
-      </header>
+    <div className="ops-console flex min-h-dvh items-center justify-center p-4 sm:p-8">
+      <main className="grid w-full max-w-4xl overflow-hidden rounded-xl border border-line bg-panel md:grid-cols-[1fr_1.05fr]">
+        <header className="flex flex-col justify-between gap-10 border-b border-line p-7 md:border-b-0 md:border-r">
+          <div className="flex items-center gap-2.5">
+            <Mark />
+            <span className="text-[17px] font-semibold tracking-tight">Line</span>
+          </div>
+          <div>
+            <h1 className="text-[28px] font-semibold leading-tight tracking-tight">Was the house checked?</h1>
+            <p className="mt-3 max-w-sm text-[13px] leading-relaxed text-muted">
+              Families call the line about a home inside the fire perimeter. Officers mark each door
+              they knock, and dispatch sees every answer and every call on one map.
+            </p>
+          </div>
+          <dl className="grid gap-1.5 rounded-lg bg-panel-2 px-4 py-3 text-xs">
+            <div className="flex justify-between gap-3">
+              <dt className="text-muted">Incident:</dt>
+              <dd>Palisades Fire</dd>
+            </div>
+            <div className="flex justify-between gap-3">
+              <dt className="text-muted">Status:</dt>
+              <dd className="flex items-center gap-1.5 text-clear">
+                <span aria-hidden className="h-1.5 w-1.5 animate-pulse rounded-full bg-clear" />
+                Active
+              </dd>
+            </div>
+            <div className="flex justify-between gap-3">
+              <dt className="text-muted">Line:</dt>
+              <dd className="figure">(213) 752-2494</dd>
+            </div>
+          </dl>
+        </header>
 
-      <form onSubmit={submit} className="space-y-5">
-        <fieldset className="space-y-2.5">
-          <legend className="mb-2.5 text-xs font-semibold uppercase tracking-wider text-muted">
-            Portal
-          </legend>
-          {PORTALS.map((p) => {
-            const selected = role === p.role;
-            return (
-              <label
-                key={p.role}
-                className={`flex cursor-pointer items-center gap-3.5 rounded-xl border p-4 transition-colors ${
-                  selected
-                    ? 'border-info/70 bg-info/10'
-                    : 'border-line bg-panel hover:border-line/80 hover:bg-panel-2'
-                }`}
-              >
-                <input
-                  type="radio"
-                  name="role"
-                  value={p.role}
-                  checked={selected}
-                  onChange={() => {
-                    setRole(p.role);
-                    setError(null);
-                  }}
-                  className="sr-only"
-                />
-                <svg
-                  aria-hidden
-                  viewBox="0 0 24 24"
-                  className={`h-6 w-6 shrink-0 ${selected ? 'fill-info' : 'fill-muted'}`}
+        <form onSubmit={submit} className="p-7">
+          <h2 className="text-[15px] font-semibold">Start your shift</h2>
+          <p className="mt-1 text-xs text-muted">Pick your role and enter the code for this shift.</p>
+
+          <fieldset className="mt-6 grid gap-2">
+            <legend className="mb-2 text-xs text-muted">Role</legend>
+            {PORTALS.map((p) => {
+              const selected = role === p.role;
+              return (
+                <label
+                  key={p.role}
+                  className={`flex cursor-pointer items-center gap-3 rounded-lg border px-4 py-3 transition-colors ${
+                    selected ? 'border-clear/60 bg-clear/10' : 'border-line hover:bg-panel-2'
+                  }`}
                 >
-                  <path d={p.icon} />
-                </svg>
-                <span className="min-w-0">
-                  <span className="block text-sm font-semibold">{p.title}</span>
-                  <span className="block text-xs text-muted">{p.blurb}</span>
-                </span>
-              </label>
-            );
-          })}
-        </fieldset>
+                  <input
+                    type="radio"
+                    name="role"
+                    value={p.role}
+                    checked={selected}
+                    onChange={() => {
+                      setRole(p.role);
+                      setError(null);
+                    }}
+                    className="h-4 w-4 shrink-0 accent-[var(--clear)]"
+                  />
+                  <span className="min-w-0">
+                    <span className="block text-[13px] font-medium">{p.title}</span>
+                    <span className="block text-[11px] text-muted">{p.blurb}</span>
+                  </span>
+                </label>
+              );
+            })}
+          </fieldset>
 
-        <div className="space-y-2">
-          <label htmlFor="passcode" className="block text-xs font-semibold uppercase tracking-wider text-muted">
-            Shift code
-          </label>
-          <input
-            id="passcode"
-            type="password"
-            inputMode="numeric"
-            autoComplete="off"
-            autoFocus
-            value={passcode}
-            onChange={(e) => {
-              setPasscode(e.target.value);
-              setError(null);
-            }}
-            placeholder="••••"
-            aria-invalid={Boolean(error)}
-            aria-describedby={error ? 'passcode-error' : undefined}
-            className="w-full rounded-xl border border-line bg-panel px-4 py-3.5 text-center text-2xl tracking-[0.5em] text-text outline-none placeholder:tracking-[0.3em] placeholder:text-muted/50 focus:border-info"
-          />
-          {error && (
-            <p id="passcode-error" role="alert" className="text-sm text-critical">
-              {error}
+          <div className="mt-5">
+            <label htmlFor="passcode" className="mb-2 block text-xs text-muted">
+              Shift code
+            </label>
+            <input
+              id="passcode"
+              type="password"
+              inputMode="numeric"
+              autoComplete="off"
+              autoFocus
+              value={passcode}
+              onChange={(e) => {
+                setPasscode(e.target.value);
+                setError(null);
+              }}
+              placeholder="from your supervisor"
+              aria-invalid={Boolean(error)}
+              aria-describedby={error ? 'passcode-error' : undefined}
+              className="w-full rounded-lg border border-line bg-panel-2 px-4 py-3 text-lg tracking-[0.3em] text-text outline-none placeholder:text-[13px] placeholder:tracking-normal placeholder:text-muted focus:border-clear"
+            />
+            {error && (
+              <p id="passcode-error" role="alert" className="mt-2 text-xs text-critical">
+                {error}
+              </p>
+            )}
+          </div>
+
+          <button
+            type="submit"
+            disabled={busy || passcode.length === 0}
+            className="mt-6 w-full rounded-lg bg-text px-4 py-3 text-[13px] font-semibold text-bg transition-opacity hover:opacity-90 disabled:opacity-30"
+          >
+            {busy ? 'Signing in…' : 'Sign in →'}
+          </button>
+
+          {showHints && (
+            <p className="mt-5 border-t border-dashed border-line pt-3 text-[11px] leading-relaxed text-muted">
+              dev codes: officer <span className="text-text">1420</span> · dispatch{' '}
+              <span className="text-text">5150</span>
+              <br />
+              set OFFICER_PASSCODE / DISPATCH_PASSCODE to change
             </p>
           )}
-        </div>
-
-        <button
-          type="submit"
-          disabled={busy || passcode.length === 0}
-          className="w-full rounded-xl bg-info px-4 py-3.5 text-base font-semibold text-bg transition-opacity disabled:opacity-40"
-        >
-          {busy ? 'Signing in…' : 'Sign in'}
-        </button>
-      </form>
-
-      {showHints && (
-        <p className="rounded-lg border border-dashed border-line px-3.5 py-2.5 font-mono text-xs leading-relaxed text-muted">
-          dev codes — officer <span className="text-text">1420</span> · dispatch{' '}
-          <span className="text-text">5150</span>
-          <br />
-          set OFFICER_PASSCODE / DISPATCH_PASSCODE to change
-        </p>
-      )}
-    </main>
+        </form>
+      </main>
+    </div>
   );
 }

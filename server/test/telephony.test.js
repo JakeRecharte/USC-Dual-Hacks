@@ -5,7 +5,7 @@ if (process.env.SUPABASE_URL) throw new Error('tests must not run against Supaba
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { checkBypass, callerText } from '../src/bypass.js';
-import { lookupAddress, logCall, logUnrouted, logTransferFailed, getCall, addressKey, nameMatches, spokenNumber, sameStreet, streetGeo } from '../src/backend.js';
+import { lookupAddress, logCall, logUnrouted, logTransferFailed, getCall, addressKey, nameMatches, findHousehold, spokenNumber, sameStreet, streetGeo } from '../src/backend.js';
 import { route, routineScore, FRESH_MIN } from '../src/routing.js';
 import { sayForLookup, sayForRouting } from '../src/speech.js';
 import { scoreDistress, handoffInstruction } from '../src/distress.js';
@@ -318,8 +318,28 @@ test('C: "he told me he is staying" from a relative is recorded as a phone repor
   assert.equal(Date.parse(r.recorded_at), now - 20 * 60000, 'recorded when the news is from, not now');
 });
 
-test('C: a relative saying "she is out" never clears a house', () => {
-  assert.ok(callReport({ reported_status: 'out', reported_by: 'relative_or_friend' }, { address_id: 'x', status: 'unknown' }, now).skip);
+test('C: a relative saying "she is out" never clears a house; it marks it evacuating, unverified', () => {
+  const r = callReport({ reported_status: 'out', reported_by: 'relative_or_friend' }, { address_id: 'x', status: 'unknown' }, now);
+  assert.equal(r.status, 'in_transit');
+  assert.match(r.note, /unverified/);
+  assert.ok(callReport({ reported_status: 'out', reported_by: 'relative_or_friend' }, { address_id: 'x', status: 'refused' }, now).skip);
+  assert.ok(callReport({ reported_status: 'out', reported_by: 'relative_or_friend' },
+    { address_id: 'x', status: 'cleared', recorded_at: new Date(now - 30 * 60000).toISOString() }, now).skip);
+  assert.equal(callReport({ reported_status: 'out', reported_by: 'relative_or_friend' },
+    { address_id: 'x', status: 'cleared', recorded_at: new Date(now - 300 * 60000).toISOString() }, now).status, 'in_transit');
+});
+
+test('B6: speech-recognition slips in a name still match; a different person does not', () => {
+  assert.equal(nameMatches('Ibrahim Fischer', 'Abraham Fisher'), true);
+  assert.equal(nameMatches('Oscar Raman', 'Oscar Ramen'), true);
+  assert.equal(nameMatches('Priscilla Demir', 'Priscilla de la Mirror'), true);
+  assert.equal(nameMatches('Oscar Raman', 'Oscar Robin'), false);
+  assert.equal(nameMatches('Ruth Adams', 'Ruth Adkins'), false);
+});
+
+test('B8: a misheard street with the same sound and number finds the house', () => {
+  const rows = [{ id: 'd', address: '294 Dryad Rd' }, { id: 'o', address: '294 Ocampo Dr' }];
+  assert.equal(findHousehold(rows, '294 Dyerida Road', 'Priscilla Demir')?.id, 'd');
 });
 
 test('C: a resident saying "I am out" is recorded, unless the house is marked staying', () => {
@@ -456,4 +476,28 @@ test('a house we do not have is placed at the centre of its street', () => {
   assert.equal(g.precision, 'street');
   assert.ok(Math.abs(g.lat - 34.05) < 1e-9 && Math.abs(g.lng + 118.53) < 1e-9);
   assert.equal(streetGeo(sameStreet(rows, '9 Nowhere Ln')), null);
+});
+
+// Real calls, 7:07 and 7:15 PM: the agent sent reported_status "staying" for "the evacuation
+// has been cleared", and "with them now" sent good news to a person and turned the house red.
+test('report: the caller\'s words override a wrong reported_status', async () => {
+  const { reconcileReport, reportIntent } = await import('../src/report-intent.js');
+  const r = reconcileReport({ reported_status: 'staying', reported_by: 'relative_or_friend',
+    caller_update: 'The evacuation has been cleared for Priscilla Fisher.' });
+  assert.equal(r.reported_status, 'out');
+  assert.equal(reconcileReport({ reported_status: null, caller_update: null }, ['she left this morning, she is at her sister\'s']).reported_status, 'out');
+  assert.equal(reconcileReport({ reported_status: 'out', caller_update: 'he is staying to protect the house' }).reported_status, 'staying');
+  assert.equal(reconcileReport({ reported_status: null, caller_update: null }, ['I am out, I am at my sister\'s house']).reported_by, 'resident');
+  assert.equal(reportIntent("I haven't heard from her"), null);
+  assert.equal(reportIntent("she's at her house"), null);
+});
+
+test('report: "they\'re out" is answered by the agent, with them or not; "staying" still goes to a person', () => {
+  const lookup = { found: true, name_match: true, status: 'no_answer', inside_perimeter: true, recorded_at: new Date(now - 30 * 60000).toISOString() };
+  const base = { mode: 'wildfire', reported_by: 'relative_or_friend', caller_state: 'calm' };
+  assert.equal(route({ ...base, with_them_now: true, reported_status: 'out' }, lookup, now).routing, 'answered_by_agent');
+  assert.equal(route({ ...base, with_them_now: false, reported_status: 'out' }, lookup, now).routing, 'answered_by_agent');
+  assert.equal(route({ ...base, with_them_now: false, reported_status: 'staying' }, lookup, now).routing, 'priority_queue');
+  assert.equal(route({ ...base, with_them_now: true, reported_status: 'out', emergency: true }, lookup, now).routing, 'human_now');
+  assert.equal(route({ ...base, with_them_now: true, reported_status: 'out', caller_state: 'panicked' }, lookup, now).routing, 'human_now');
 });

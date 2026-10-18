@@ -13,11 +13,11 @@ import { useCallback, useMemo, useRef, useState } from 'react';
 import { NEARBY_RADIUS_FT, NEARBY_RADIUS_M, distanceMetres, within } from '@/lib/geo';
 import { useOfficerPosition, type GpsState } from '@/lib/officer-position';
 import { useOfflineQueue } from '@/lib/offline-queue';
-import { STATUS_COLOR, relativeMinutes, ageMinutes, urgencyOf } from '@/lib/priority';
+import { relativeMinutes, ageMinutes, urgencyOf } from '@/lib/priority';
 import { useAddresses, useNow } from '@/lib/use-live';
 import { STATUS_LABEL, STRUCTURE_LABEL } from '@/lib/types';
 import type { AddressState, Status, Structure } from '@/lib/types';
-import { ConnectionDot, SignOutButton, StatusChip } from '@/components/ui';
+import { ConnectionDot, Mark, SignOutButton, StatusChip, URGENCY_VAR } from '@/components/ui';
 
 // MapLibre touches `window` at import time, so the map only ever loads in the browser —
 // the same arrangement the dispatcher's board uses. Here it also keeps the header and the
@@ -109,7 +109,7 @@ export function OfficerPortal() {
   };
 
   return (
-    <div className="relative h-dvh w-full overflow-hidden bg-bg">
+    <div className="ops-console relative h-dvh w-full overflow-hidden">
       <div className="absolute inset-0">
         <OfficerMap
           households={addresses}
@@ -127,14 +127,14 @@ export function OfficerPortal() {
 
       {/* Header floats over the map: on a phone the map is the screen. */}
       <header className="pointer-events-none absolute inset-x-0 top-0 z-20 p-3">
-        <div className="pointer-events-auto flex items-center justify-between gap-2 rounded-2xl border border-line bg-bg px-3 py-2.5">
+        <div className="pointer-events-auto flex items-center justify-between gap-2 rounded-lg border border-line bg-panel/95 px-3 py-2.5 shadow-2xl backdrop-blur">
           <div className="flex min-w-0 items-center gap-2">
-            <span aria-hidden className="h-5 w-1 shrink-0 rounded-full bg-critical" />
+            <Mark className="h-7 w-7 shrink-0" />
             <div className="min-w-0">
-              <h1 className="truncate text-sm font-semibold leading-tight tracking-tight">
-                Door knocks
+              <h1 className="truncate text-[13px] font-semibold leading-tight">
+                Line <span className="text-muted">/</span> Door knocks
               </h1>
-              <p className="truncate text-xs text-muted">
+              <p className="figure truncate text-[11px] text-muted">
                 {position
                   ? `${inRangeCount} within ${NEARBY_RADIUS_FT} ft`
                   : 'Finding your position…'}
@@ -143,7 +143,7 @@ export function OfficerPortal() {
           </div>
           <div className="flex shrink-0 items-center gap-2">
             {pending.length > 0 ? (
-              <span className="inline-flex items-center gap-1.5 rounded-full border border-watch/50 bg-watch/15 px-2.5 py-1 text-xs font-semibold text-watch">
+              <span className="chip" style={{ '--tone': 'var(--high)' } as React.CSSProperties}>
                 {pending.length} to send
               </span>
             ) : (
@@ -165,7 +165,7 @@ export function OfficerPortal() {
         <button
           type="button"
           onClick={recenter}
-          className={`absolute right-3 z-20 flex items-center gap-2 rounded-full border border-info/60 bg-bg px-4 py-3 text-sm font-semibold text-info shadow-lg active:bg-info/20 ${
+          className={`absolute right-3 z-20 flex items-center gap-2 rounded-lg border border-line bg-panel px-4 py-3 text-[13px] font-semibold text-clear shadow-2xl active:bg-panel-2 ${
             selected ? 'bottom-[22rem]' : 'bottom-7'
           }`}
         >
@@ -176,7 +176,7 @@ export function OfficerPortal() {
 
       {!position && (
         <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center">
-          <p className="rounded-xl border border-line bg-bg px-4 py-3 text-sm text-muted">
+          <p className="rounded-lg border border-line bg-panel px-4 py-3 text-[13px] text-muted">
             {addresses.length === 0 ? 'Loading the household list…' : 'Waiting for a position…'}
           </p>
         </div>
@@ -228,9 +228,9 @@ function PositionNotice({
   return (
     <div className="mt-2 space-y-2">
       {notice && (
-        <div className="pointer-events-auto rounded-xl border border-info/40 bg-bg px-3 py-2">
-          <p className="flex items-start gap-2 text-xs leading-relaxed text-info">
-            <span className="mt-px shrink-0 rounded bg-info/20 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider">
+        <div className="pointer-events-auto rounded-lg border border-line bg-panel/95 px-3 py-2.5 backdrop-blur">
+          <p className="flex items-start gap-2 text-xs leading-relaxed">
+            <span className="chip mt-px shrink-0 uppercase" style={{ '--tone': 'var(--watch)' } as React.CSSProperties}>
               Simulated
             </span>
             <span className="text-muted">{notice}</span>
@@ -242,7 +242,7 @@ function PositionNotice({
         </div>
       )}
       {!online && (
-        <p className="pointer-events-auto rounded-xl border border-watch/40 bg-bg px-3 py-2 text-xs leading-relaxed text-watch">
+        <p className="pointer-events-auto rounded-lg border border-high/40 bg-panel/95 px-3 py-2 text-xs leading-relaxed text-high backdrop-blur">
           No signal. Keep working — every tap is saved with the time you made it and sent
           automatically when you are back in range.
         </p>
@@ -286,14 +286,14 @@ function DoorSheet({
   return (
     <section
       aria-label={`Record a status for ${address.address}`}
-      className="absolute inset-x-0 bottom-0 z-30 max-h-[85dvh] overflow-y-auto rounded-t-3xl border-t border-line bg-bg pb-[max(0.75rem,env(safe-area-inset-bottom))]"
+      className="absolute inset-x-0 bottom-0 z-30 max-h-[85dvh] overflow-y-auto rounded-t-2xl border-t border-line bg-panel pb-[max(0.75rem,env(safe-area-inset-bottom))] shadow-[0_-24px_48px_-24px_rgba(0,0,0,.8)]"
     >
       <div className="px-4 pt-3">
         <div aria-hidden className="mx-auto mb-3 h-1.5 w-12 rounded-full bg-line" />
 
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <h2 className="text-xl font-semibold leading-tight">{address.address}</h2>
+            <h2 className="text-lg font-semibold leading-tight">{address.address}</h2>
             <p className="mt-0.5 truncate text-sm text-muted">
               {address.resident_name}
               {metres != null && ` · ${Math.round(metres * 3.28084)} ft away`}
@@ -302,7 +302,7 @@ function DoorSheet({
           <span
             aria-hidden
             className="mt-1 h-4 w-4 shrink-0 rounded"
-            style={{ background: STATUS_COLOR[address.status] }}
+            style={{ background: URGENCY_VAR[urgencyOf(address, now)] }}
           />
         </div>
 
@@ -316,7 +316,7 @@ function DoorSheet({
         </div>
 
         {address.note && (
-          <p className="mt-2.5 rounded-lg border-l-2 border-critical/60 bg-panel-2 px-3 py-2 text-sm leading-relaxed">
+          <p className="mt-2.5 rounded-md border-l-2 border-critical/60 bg-panel-2 px-3 py-2 text-[13px] leading-relaxed">
             {address.note}
           </p>
         )}
@@ -328,12 +328,12 @@ function DoorSheet({
               type="button"
               onClick={() => onRecord(address, { status: b.status, note: note.trim() || null })}
               aria-current={address.status === b.status}
-              className={`flex w-full items-baseline justify-between gap-3 rounded-2xl border px-5 py-5 text-left text-lg font-semibold transition-colors ${b.tone} ${
+              className={`flex w-full items-baseline justify-between gap-3 rounded-lg border px-5 py-5 text-left text-base font-semibold transition-colors ${b.tone} ${
                 address.status === b.status ? 'ring-2 ring-inset ring-current' : ''
               }`}
             >
               {STATUS_LABEL[b.status]}
-              <span className="text-xs font-medium uppercase tracking-wider opacity-70">{b.help}</span>
+              <span className="text-[11px] font-medium uppercase tracking-wider opacity-70">{b.help}</span>
             </button>
           ))}
 
@@ -341,7 +341,7 @@ function DoorSheet({
             type="button"
             onClick={() => onRecord(address, { status: 'no_answer', note: note.trim() || null })}
             aria-current={address.status === 'no_answer'}
-            className={`w-full rounded-2xl border border-line bg-panel py-4 text-base font-semibold text-muted transition-colors active:bg-panel-2 ${
+            className={`w-full rounded-lg border border-line bg-panel-2 py-4 text-sm font-semibold text-muted transition-colors active:bg-line ${
               address.status === 'no_answer' ? 'ring-2 ring-inset ring-watch text-watch' : ''
             }`}
           >
@@ -374,9 +374,9 @@ function DoorSheet({
                     type="button"
                     onClick={() => onRecord(address, { structure: s })}
                     aria-current={address.structure === s}
-                    className={`rounded-xl border py-3.5 text-sm font-medium transition-colors ${
+                    className={`rounded-lg border py-3.5 text-[13px] font-medium transition-colors ${
                       address.structure === s
-                        ? 'border-info/70 bg-info/15 text-text'
+                        ? 'border-clear/60 bg-clear/10 text-text'
                         : 'border-line bg-panel-2 text-muted active:bg-line'
                     }`}
                   >
@@ -403,7 +403,7 @@ function DoorSheet({
                 onChange={(e) => setNote(e.target.value)}
                 maxLength={280}
                 placeholder="2 adults staying, 1 on oxygen"
-                className="w-full resize-none rounded-lg border border-line bg-panel-2 px-3 py-2.5 text-base outline-none placeholder:text-muted/60 focus:border-info"
+                className="w-full resize-none rounded-lg border border-line bg-panel-2 px-3 py-2.5 text-base outline-none placeholder:text-muted/60 focus:border-clear"
               />
               <p className="mt-1.5 text-xs text-muted">Sent with the next status you tap.</p>
             </div>
@@ -414,7 +414,7 @@ function DoorSheet({
         <button
           type="button"
           onClick={onClose}
-          className="mt-3 w-full rounded-2xl border border-line bg-panel py-4 text-base font-semibold text-muted active:bg-panel-2"
+          className="mt-3 w-full rounded-lg border border-line py-4 text-sm font-semibold text-muted active:bg-panel-2"
         >
           Close
         </button>

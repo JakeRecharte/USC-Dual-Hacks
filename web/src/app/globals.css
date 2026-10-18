@@ -83,6 +83,51 @@ body {
   --color-paper-accent: var(--paper-accent);
 }
 
+/*
+ * The ops console: dispatch, sign-in and the officer screen. Near-black panels, monospace
+ * throughout, green for "done" and the accent. Scoped by class so the map keeps its own
+ * paper palette. Status colours are the console's own (lib/priority.ts URGENCY_COLOR is
+ * tuned for the paper map and goes muddy on black).
+ */
+.ops-console {
+  --bg: #0b0c0b;
+  --panel: #141614;
+  --panel-2: #1b1e1b;
+  --line: #262a26;
+  --text: #e8ebe5;
+  --muted: #8b9187;
+  --critical: #ef5b52;
+  --high: #e8b23f;
+  --watch: #5fbfdc;
+  --clear: #57cf6b;
+  --info: #57cf6b;
+  color-scheme: dark;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+
+/* A tinted chip: text in the colour, background a wash of it. */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  border-radius: 4px;
+  padding: 0.125rem 0.5rem;
+  font: 500 11px/1.5 var(--font-mono);
+  color: var(--tone);
+  background: color-mix(in srgb, var(--tone) 16%, transparent);
+  white-space: nowrap;
+}
+
+/* Tabular figures for every count and clock on the console. */
+.figure {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+
 /* Mono uppercase label, the eyebrow from the reference. */
 .eyebrow {
   font: 500 11px/1.2 var(--font-mono);

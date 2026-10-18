@@ -6,10 +6,10 @@
 //   node --experimental-strip-types scripts/build-seed-sql.mjs
 //   node ../docs/sql/build-setup-all.mjs
 //
-// CAUTION: the household set comes from src/lib/household-sites.ts (all 8,103 OSM buildings, so
-// ~8,088 inside the perimeter). The committed docs/seed.sql holds 1,998 households,
-// the set the team's Supabase project was seeded with. Running this changes the household set
-// from 1,998 to ~8,088; run it only when that is what you mean.
+// CAUTION: this no longer reproduces the committed docs/seed.sql. The households (ids, names,
+// coordinates, zones) are the same, but removing the invented-status draws from addresses.ts shifted
+// its random stream, so the street number of nearly every household differs. The committed seed keeps
+// the numbers the team already seeded and tested with, so this refuses to overwrite it without --force.
 //
 // Ids: household a<N> becomes 00000000-0000-4000-8000-<N, 12 digits>, so the scripted
 // households a1..a8 keep the ids the voice agent and the tests know them by.
@@ -59,5 +59,10 @@ ${householdRows.join(',\n')};
 -- No status_log rows on purpose.
 `;
 
+if (!process.argv.includes('--force')) {
+  console.error('refusing to overwrite docs/seed.sql: it would change the street number of nearly every household.\n'
+    + 'Re-run with --force if that is what you mean.');
+  process.exit(1);
+}
 writeFileSync(resolve(here, '../../docs/seed.sql'), seed);
 console.log(`wrote docs/seed.sql (${rows.length} households, no statuses)`);

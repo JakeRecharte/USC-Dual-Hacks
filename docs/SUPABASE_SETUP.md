@@ -129,7 +129,7 @@ psql "$SUPABASE_DB_URL" -f docs/seed.sql
 Or paste it into the Supabase SQL editor. It begins with the two deletes, so re-running it
 resets the households. From `server/`, `npm run reset-demo` does the same plus clears the call log.
 
-After the seed, the board should read **1,998 houses, all grey, 0 refused**. If it doesn't, the
+After the seed, the board should read **8,088 houses, all grey, 0 refused**. If it doesn't, the
 seed didn't take.
 
 **A project that already holds the invented data:** run `docs/sql/house_colors.sql`, then

@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { browserClient } from './supabase';
 import { fetchBoard } from './supabase-data';
-import { mergeCall, worseState } from './calls';
+import { callFromDb, mergeCall, worseState } from './calls';
 import type { AddressState, CallRow, CallerState } from './types';
 
 /** A ticking clock, so "40 min ago" ages on screen without a refresh. */
@@ -175,10 +175,52 @@ export const telephonyConfigured = Boolean(TELEPHONY);
  * dispatcher sees "call in progress" rather than nothing. `call_logged` then fills in the
  * routing, and `bypass` jumps it straight to human_now.
  */
+/** How far back the queue reads public.calls: a shift. */
+const CALL_WINDOW_MS = 12 * 60 * 60 * 1000;
+const CALL_COLUMNS = 'id, call_id, mode, address, subject_name, address_id, routing, severity, reason, created_at, from_number, bypass, caller_state, distress_score, ended_at';
+
 export function useCalls() {
   const [calls, setCalls] = useState<CallRow[]>([]);
   const [connection, setConnection] = useState<Connection>(TELEPHONY ? 'connecting' : 'offline');
   const upsert = useUpsertCall(setCalls);
+
+  // Supabase: the durable queue. The telephony server's feed below lives in its memory, so a
+  // redeploy or a demo reset emptied the queue on screen; public.calls keeps every call, and
+  // Realtime brings each insert and update as the server writes it.
+  useEffect(() => {
+    let cancelled = false;
+    let cleanup: (() => void) | undefined;
+    void fetch('/api/db-token')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((s: { mode: string; token?: string } | null) => {
+        if (cancelled || s?.mode !== 'supabase' || !s.token) return;
+        const client = browserClient(s.token);
+        const load = async () => {
+          const since = new Date(Date.now() - CALL_WINDOW_MS).toISOString();
+          const { data, error } = await client.from('calls').select(CALL_COLUMNS)
+            .gte('created_at', since).order('created_at', { ascending: false }).limit(200);
+          if (cancelled || error) return;
+          setCalls((data ?? []).map((r) => callFromDb(r as Record<string, unknown>)));
+          setConnection('live');
+        };
+        void load();
+        const channel = client
+          .channel('line-calls')
+          .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'calls' }, (p) => upsert(callFromDb(p.new)))
+          .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'calls' }, (p) => upsert(callFromDb(p.new)))
+          // A delete is a demo reset: read the queue again rather than guess which row went.
+          .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'calls' }, () => void load())
+          .subscribe((status) => {
+            if (status === 'SUBSCRIBED') setConnection('live');
+          });
+        cleanup = () => void client.removeChannel(channel);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+      cleanup?.();
+    };
+  }, [upsert]);
 
   useEffect(() => {
     if (!TELEPHONY) return;

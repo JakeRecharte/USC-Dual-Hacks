@@ -27,7 +27,7 @@ Two screens: a **laptop** on `/dispatch` (shared/projected) and a **phone** on `
    fallback at the bottom.
 6. Have the phone already scrolled to **640 Toyopa Dr**.
 
-A clean reset shows **1,998 houses, all grey, 0 refused**. If it doesn't, you didn't reset.
+A clean reset shows **8,088 houses, all grey, 0 refused**. If it doesn't, you didn't reset.
 
 ---
 

@@ -125,6 +125,10 @@ export function findHousehold(rows, address, subject_name) {
     .filter((x) => x.score >= 0.75)
     .sort((a, b) => b.score - a.score);
   if (close.length === 1 || (close.length > 1 && close[0].score > close[1].score)) return close[0].r;
+  // Same number, street that sounds the same ("294 Dyerida Road" for 294 Dryad Rd).
+  const saidSkel = skeleton(said.join(''));
+  const alike = sameNumber.filter((r) => skeleton(addressKey(r.address).split(' ').slice(1).join('')) === saidSkel);
+  if (alike.length === 1) return alike[0];
   // Number misheard ("one six eight zero zero" → 1680 on a real call): the same street and
   // the named resident. Needs the name, so it reveals nothing a wrong-name caller couldn't get.
   const street = said.join(' ');
@@ -133,15 +137,44 @@ export function findHousehold(rows, address, subject_name) {
   return byName.length === 1 ? byName[0] : null;
 }
 
-// The record's first name plus at least one other of its names. Accents, hyphens and
-// apostrophes don't matter: "María López-García" matches "Maria Lopez", "obrien" "O'Brien".
+// Consonant skeleton: the first letter, then consonants only, doubles collapsed. Speech
+// recognition keeps consonants and smears vowels, so "Dyerida" and "Dryad" both read "drd",
+// "Demir" and "de la Mirror" both "dmr".
+export function skeleton(s) {
+  const w = fold(s).replace(/[^a-z]/g, '');
+  if (!w) return '';
+  return (w[0] + w.slice(1).replace(/[aeiouy]/g, '')).replace(/(.)\1+/g, '$1');
+}
+// a is b with at most one consonant missing, same first letter: "dmr" in "dlmr".
+function nearSkeleton(a, b) {
+  if (a.length < 3 || a[0] !== b[0] || b.length - a.length !== 1) return false;
+  let i = 0;
+  for (const c of b) if (c === a[i]) i++;
+  return i === a.length;
+}
+const soundsLike = (a, b) => a === b || similarity(a, b) >= 0.7 || (a.length > 2 && skeleton(a) === skeleton(b));
+
+// The record's first name plus at least one other of its names, allowing the slips a phone
+// line makes. On real calls "Ibrahim Fischer" came through as "Abraham Fisher" and "Oscar
+// Raman" as "Austin Raman", and the caller was asked for the name four times. So:
+//   * each name may be a near miss (edit distance, or the same consonant skeleton), and a
+//     spoken surname may span words ("de la Mirror" for "Demir").
+// The first name still has to be heard: "Rosa Lopez" is not Maria Lopez, and "Austin Raman"
+// gets one more ask (the lookup route stops asking after two misses).
 export function nameMatches(resident, subject) {
   const words = (s) => fold(s).replace(/'/g, '').replace(/[^a-z\s-]/g, ' ').split(/[\s-]+/).filter(Boolean);
-  const said = new Set(words(subject));
+  const saidWords = words(subject);
+  const said = [...saidWords];
+  for (let i = 0; i < saidWords.length - 1; i++) {
+    said.push(saidWords[i] + saidWords[i + 1]);
+    if (i < saidWords.length - 2) said.push(saidWords[i] + saidWords[i + 1] + saidWords[i + 2]);
+  }
   const [first, ...rest] = words(resident);
-  if (!first) return false;
-  if (!said.has(first)) return false;
-  return rest.length === 0 || rest.some((w) => said.has(w));
+  if (!first || !saidWords.length) return false;
+  const heard = (w) => said.some((x) => soundsLike(w, x));
+  // Once the first name is right, a surname may also be heard with one extra sound in it.
+  const heardLoose = (w) => heard(w) || said.some((x) => nearSkeleton(skeleton(w), skeleton(x)));
+  return heard(first) && (rest.length === 0 || rest.some(heardLoose));
 }
 
 const NOT_FOUND = { found: false, address_id: null, name_match: false, status: null, recorded_at: null, note: null, source: null, inside_perimeter: null };
@@ -222,15 +255,15 @@ async function currentStatus(address, now, subject_name) {
     try {
       const row = findHousehold(await dbHouseholds(now), address, subject_name);
       if (!row) return null;
-      const { data, error } = await db.from('status_log').select('status, note').eq('address_id', row.id)
+      const { data, error } = await db.from('status_log').select('status, note, recorded_at').eq('address_id', row.id)
         .order('recorded_at', { ascending: false }).limit(1);
       if (error) throw error;
-      return { address_id: row.id, status: data[0]?.status ?? 'unknown', note: data[0]?.note ?? null };
+      return { address_id: row.id, status: data[0]?.status ?? 'unknown', note: data[0]?.note ?? null, recorded_at: data[0]?.recorded_at ?? null };
     } catch (err) { dbFailed('current status', err); }
   }
   const row = findHousehold(FAKE_ADDRESSES, address, subject_name);
   const latest = row ? fakeLatest(row, now) : null;
-  return row ? { address_id: row.id, status: latest?.status ?? 'unknown', note: latest?.note ?? null } : null;
+  return row ? { address_id: row.id, status: latest?.status ?? 'unknown', note: latest?.note ?? null, recorded_at: latest?.recorded_at ?? null } : null;
 }
 
 async function writeReport(report, now) {
