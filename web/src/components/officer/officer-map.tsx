@@ -134,7 +134,7 @@ const siteKey = (lat: number, lng: number) => `${lat.toFixed(5)},${lng.toFixed(5
 
 async function loadOutlines(signal: AbortSignal): Promise<Map<string, [number, number][]> | null> {
   try {
-    const res = await fetch('/buildings.json', { signal, cache: 'force-cache' });
+    const res = await fetch('/buildings.json', { signal, cache: 'no-cache' });
     if (!res.ok) return null;
     const file = (await res.json()) as BuildingFile;
     const bySite = new Map<string, [number, number][]>();

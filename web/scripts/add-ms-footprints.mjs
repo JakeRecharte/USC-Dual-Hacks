@@ -118,7 +118,13 @@ for await (const line of lines) {
   const flat = pts.slice(0, -1).flatMap(([x, y]) => [round5(x), round5(y)]);
   const mine = pairs(flat);
   const candidates = near(lat, lng);
-  const overlaps = candidates.some((i) => inside([lat, lng], pairs(rings[i])) || inside(cent[i], mine));
+  // Any vertex of either outline inside the other: a centroid test alone let through
+  // footprints that half-covered a house and drew as one doubled blob.
+  const overlaps = candidates.some((i) => {
+    const theirs = pairs(rings[i]);
+    return inside([lat, lng], theirs) || inside(cent[i], mine)
+      || mine.some((p) => inside(p, theirs)) || theirs.some((p) => inside(p, mine));
+  });
   if (overlaps || taken.has(`${lat},${lng}`)) { skipped.overlap += 1; continue; }
 
   // Zone of the nearest OSM building: zones are k-means clusters over them, so this is the

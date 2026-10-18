@@ -128,14 +128,14 @@ Or paste it into the Supabase SQL editor. It begins with the two deletes, so re-
 resets the board between demo runs; the timestamps are relative to `now()`, so the ages
 re-base each time.
 
-After seeding, the dispatch board should read **7,136 unresolved of 12,396**, **549 refused**,
-**2,718 never contacted**, **1,187 stale clears**, with Rustic Canyon (`PAL-07`) first at
-`1083/1392`. If it doesn't, the seed didn't take.
+After seeding, the dispatch board should read **7,041 unresolved of 12,293**, **548 refused**,
+**2,728 never contacted**, **1,145 stale clears**, with Rustic Canyon (`PAL-07`) first at
+`1069/1373`. If it doesn't, the seed didn't take.
 
 **Every household sits on a real building.** The coordinates are centroids of building footprints
-inside the perimeter: 8,103 from OpenStreetMap, plus 4,309 from Microsoft's ML footprints in
+inside the perimeter: 8,103 from OpenStreetMap, plus 4,206 from Microsoft's ML footprints in
 the tracts OSM never mapped (the Alphabet Streets, the Tahiti/Aloha tract, Villa Woods;
-`web/scripts/add-ms-footprints.mjs`). `web/public/buildings.json` carries all 12,412
+`web/scripts/add-ms-footprints.mjs`). `web/public/buildings.json` carries all 12,309
 outlines so the map can draw the actual shape of each house. Addresses and residents are
 invented — OSM has street addresses for only 25 buildings here — but the geography is not.
 

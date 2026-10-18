@@ -210,7 +210,7 @@ interface Outlines {
 
 async function loadOutlines(signal: AbortSignal): Promise<Outlines | null> {
   try {
-    const res = await fetch('/buildings.json', { signal, cache: 'force-cache' });
+    const res = await fetch('/buildings.json', { signal, cache: 'no-cache' });
     if (!res.ok) return null;
     const file = (await res.json()) as BuildingFile;
     const bySite = new Map<string, [number, number][]>();
