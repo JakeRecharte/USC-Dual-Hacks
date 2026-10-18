@@ -61,3 +61,24 @@ export function reconcileReport({ reported_status, reported_by, caller_update },
   if (status && !by) by = 'relative_or_friend';
   return { reported_status: status, reported_by: by, corrected };
 }
+
+// Doubt or a question: "I don't know if she's staying", "is he out?". Never acted on early.
+const UNCERTAIN = /\b(don'?t know|do not know|not sure|unsure|whether|wondering|if (she|he|they|it)|is (she|he|it)|are (they|you)|did (she|he|they)|has (she|he)|have (they|you)|maybe|might|could (she|he|they))\b|\?/;
+export const uncertain = (text) => UNCERTAIN.test(clean(text));
+
+/**
+ * The report the caller has clearly made so far, from their own lines only, or null: the
+ * newest line that says where the person is, unless that line is a question or a doubt. Used
+ * to write the report the moment it's said; log_call later confirms or takes it back.
+ */
+export function earlyReport(lines) {
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i];
+    const status = reportIntent(line);
+    if (!status) continue;
+    if (uncertain(line)) return null;
+    const { reported_by } = reconcileReport({ reported_status: status, reported_by: null, caller_update: line });
+    return { reported_status: status, reported_by, caller_update: line };
+  }
+  return null;
+}

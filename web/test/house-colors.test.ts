@@ -14,7 +14,8 @@ test('fetchAll pages past the 1,000-row cap until a short page', async () => {
     return { data: Array.from({ length: Math.max(0, Math.min(to, total - 1) - from + 1) }, (_, i) => from + i), error: null };
   });
   assert.equal(rows.length, total);
-  assert.deepEqual(seen.map(([f]) => f), [0, 1000, 2000]);
+  // Four pages per round trip: the fourth (3000) comes back empty and ends the read.
+  assert.deepEqual(seen.map(([f]) => f).sort((a, b) => a - b), [0, 1000, 2000, 3000]);
 });
 
 test('fetchAll surfaces errors instead of returning a partial board', async () => {
@@ -91,4 +92,16 @@ test('orange and yellow are valid Supabase colours', () => {
   assert.equal(out[0].color, 'orange');
   assert.equal(out[1].color, 'yellow');
   assert.equal(headline({ address: '1 A St', color: 'orange', previous_color: 'grey', first_call: false }), 'Retell changed 1 A St: GREY → ORANGE');
+});
+
+test('a Realtime houses row repaints that one house: colour and newest status', async () => {
+  const { patchFromHouse } = await import('../src/lib/supabase-data.ts');
+  const before = { id: 'h1', address: '1 Test St', lat: 0, lng: 0, zone_id: 'PAL-01', resident_name: 'A B', status: 'unknown', source: null,
+    note: null, recorded_at: null, inside_perimeter: true, structure: 'unassessed', structure_recorded_at: null, color: 'grey', color_reason: 'no verified record' } as const;
+  const after = patchFromHouse({ ...before }, { id: 'h1', color: 'yellow', color_reason: 'reported leaving, no follow-up',
+    evacuation_status: 'in_transit', evacuation_note: 'phone report (relative or friend, unverified)', evacuation_status_source: 'call', last_checked_at: '2026-10-18T03:00:00Z' });
+  assert.equal(after.color, 'yellow');
+  assert.equal(after.status, 'in_transit');
+  assert.equal(after.recorded_at, '2026-10-18T03:00:00Z');
+  assert.equal(patchFromHouse({ ...before }, { id: 'h1', color: 'purple' }).color, 'grey', 'unknown colours are ignored');
 });

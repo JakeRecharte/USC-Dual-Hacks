@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { browserClient } from './supabase';
-import { fetchBoard } from './supabase-data';
+import { fetchBoard, patchFromHouse } from './supabase-data';
 import { callFromDb, mergeCall, worseState } from './calls';
 import type { AddressState, CallRow, CallerState } from './types';
 
@@ -97,25 +97,52 @@ export function useAddresses() {
 
     // Any change refetches the board. Two small queries over ~30 rows, which is cheaper than
     // merging partial row payloads correctly and cannot drift from what the database holds.
+    // The full read is the safety net now, not the fast path: wait for a quiet moment so a
+    // burst of changes (a demo reset touches every house) reads the board once.
     const refetch = () => {
       clearTimeout(timer);
-      timer = setTimeout(() => void load(), 150);
+      timer = setTimeout(() => void load(), 2000);
+    };
+
+    // A houses row carries the colour and the newest status: apply it to that one house
+    // straight away. Re-reading the whole board took seconds per change at 8,000 houses,
+    // which is the lag between a caller's report and the map.
+    const patchHouse = (row: Record<string, unknown>) => {
+      const id = row.id as string | undefined;
+      if (!id) return;
+      setAddresses((prev) => prev.map((a) => (a.id !== id ? a : patchFromHouse(a, row))));
     };
 
     const channel = client
       .channel('line-board')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'status_log' }, refetch)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'addresses' }, refetch)
-      // Retell calls recolour houses (house_colors.sql); repaint when Supabase does.
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'houses' }, refetch)
+      // Retell calls recolour houses (house_colors.sql): paint the one house now, and let the
+      // full read catch anything else.
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'houses' }, (p) => patchHouse(p.new))
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'houses' }, (p) => patchHouse(p.new))
       .subscribe((status) => {
         if (status === 'SUBSCRIBED') setConnection('live');
         else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') setConnection('offline');
       });
 
+    // The telephony server announces a house the moment a call changes it (a 'house' event on
+    // the stream the call queue already reads). The database feed above can lag or drop an
+    // update; this one is the fast path.
+    const telephony = process.env.NEXT_PUBLIC_TELEPHONY_URL?.replace(/\/$/, '');
+    const stream = telephony ? new EventSource(`${telephony}/events`) : null;
+    stream?.addEventListener('house', (e) => {
+      try {
+        patchHouse(JSON.parse((e as MessageEvent).data) as Record<string, unknown>);
+      } catch {
+        /* a malformed event is ignored; the next full read corrects the board */
+      }
+    });
+
     return () => {
       cancelled = true;
       clearTimeout(timer);
+      stream?.close();
       void client?.removeChannel(channel);
     };
   }, [session]);

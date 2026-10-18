@@ -88,13 +88,17 @@ export function joinRows(addresses: AddressRowDb[], statuses: StatusRowDb[]): Ad
  * more statuses than that, so every read pages until a short page comes back.
  */
 export async function fetchAll<T>(page: (from: number, to: number) => PromiseLike<{ data: unknown; error: { message: string } | null }>): Promise<T[]> {
+  // Four pages at a time: at ~8,000 houses one page after another was a dozen round trips
+  // per read, seconds of lag every time a house changed.
   const rows: T[] = [];
-  for (let from = 0; ; from += 1000) {
-    const { data, error } = await page(from, from + 999);
-    if (error) throw new Error(error.message);
-    const chunk = (data ?? []) as T[];
-    rows.push(...chunk);
-    if (chunk.length < 1000) return rows;
+  for (let from = 0; ; from += 4000) {
+    const pages = await Promise.all([0, 1, 2, 3].map((k) => page(from + k * 1000, from + k * 1000 + 999)));
+    for (const { data, error } of pages) {
+      if (error) throw new Error(error.message);
+      const chunk = (data ?? []) as T[];
+      rows.push(...chunk);
+      if (chunk.length < 1000) return rows;
+    }
   }
 }
 
@@ -140,6 +144,23 @@ export async function fetchBoard(client: SupabaseClient): Promise<AddressState[]
 }
 
 const HOUSE_COLORS: HouseColor[] = ['green', 'yellow', 'orange', 'red', 'grey'];
+
+/**
+ * One house from a Realtime houses row: its colour and its newest status. Fields the row
+ * doesn't carry stay as they were; a colour the board doesn't know is ignored.
+ */
+export function patchFromHouse(a: AddressState, row: Record<string, unknown>): AddressState {
+  const next: AddressState = { ...a };
+  if (HOUSE_COLORS.includes(row.color as HouseColor)) {
+    next.color = row.color as HouseColor;
+    next.color_reason = (row.color_reason as string | null) ?? null;
+  }
+  if (typeof row.evacuation_status === 'string') next.status = row.evacuation_status as Status;
+  if ('evacuation_note' in row) next.note = (row.evacuation_note as string | null) ?? null;
+  if ('evacuation_status_source' in row) next.source = (row.evacuation_status_source as AddressState['source']) ?? null;
+  if ('last_checked_at' in row) next.recorded_at = (row.last_checked_at as string | null) ?? null;
+  return next;
+}
 
 /** Attach Supabase's colour to each household; unknown values are ignored, not trusted. */
 export function withColors(rows: AddressState[], colors: HouseColorRowDb[]): AddressState[] {

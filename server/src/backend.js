@@ -2,6 +2,7 @@
 // Reads and writes Supabase (the same tables the board uses, docs/SUPABASE_SETUP.md) when
 // SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY are set; otherwise, or if the database fails
 // mid-call, it answers from the in-memory fake data below. The line never goes down with it.
+import { EventEmitter } from 'node:events';
 import { route } from './routing.js';
 import { db, dbFailed } from './db.js';
 import { pointInPolygon } from './geo.js';
@@ -266,14 +267,65 @@ async function currentStatus(address, now, subject_name) {
   return row ? { address_id: row.id, status: latest?.status ?? 'unknown', note: latest?.note ?? null, recorded_at: latest?.recorded_at ?? null } : null;
 }
 
+// A house's colour and newest status, straight after a call changed it, so the board can
+// paint it without waiting on a database change feed (index.js streams these as 'house').
+export const houseEvents = new EventEmitter();
+async function announceHouse(addressId) {
+  if (!db || !addressId) return;
+  const { data, error } = await db.from('houses')
+    .select('id, color, color_reason, evacuation_status, evacuation_note, evacuation_status_source, last_checked_at')
+    .eq('id', addressId).maybeSingle();
+  if (!error && data) houseEvents.emit('house', data);
+}
+
+// Returns the new status_log row's id (or 'memory'), so an early write can be taken back.
 async function writeReport(report, now) {
   if (db) {
-    const { error } = await db.from('status_log').insert(report);
-    if (!error) return true;
+    const { data, error } = await db.from('status_log').insert(report).select('id').single();
+    if (!error) {
+      void announceHouse(report.address_id);
+      return data?.id ?? true;
+    }
     dbFailed('status_log insert (call report)', error);
   }
   fakeReports.set(report.address_id, { ...report });
-  return true;
+  return 'memory';
+}
+
+async function unwriteReport(early) {
+  if (db && early.id && early.id !== 'memory') {
+    const { error } = await db.from('status_log').delete().eq('id', early.id);
+    if (error) dbFailed('status_log delete (early report)', error);
+    else void announceHouse(early.address_id);
+  } else {
+    fakeReports.delete(early.address_id);
+  }
+}
+
+// Reports written while the caller is still talking (recordEarly), by call_id, so the house
+// changes colour the moment the caller says it rather than when the agent logs the call.
+// log_call then confirms the early write, or takes it back if the final report differs.
+const earlyReports = new Map();
+
+export async function recordEarly(callId, call, now = Date.now()) {
+  if (!callId || !call.reported_status) return null;
+  const prev = earlyReports.get(callId);
+  if ((prev?.reported === call.reported_status && prev?.by === call.reported_by) || prev?.pending) return null;
+  earlyReports.set(callId, { ...prev, pending: true });
+  try {
+    const current = await currentStatus(call.address, now, call.subject_name);
+    const report = callReport(call, current, now);
+    if (!report || report.skip) { earlyReports.set(callId, prev ?? {}); return null; }
+    if (prev?.id) await unwriteReport(prev);
+    const id = await writeReport(report, now);
+    const early = { status: report.status, reported: call.reported_status, by: call.reported_by, id, address_id: report.address_id };
+    earlyReports.set(callId, early);
+    return early;
+  } catch (err) {
+    earlyReports.set(callId, prev ?? {});
+    dbFailed('early report', err);
+    return null;
+  }
 }
 
 // Households change rarely, so they're cached briefly; statuses are always read fresh, because
@@ -425,13 +477,22 @@ export async function logCall(payload, now) {
 
   // What the caller told us goes back into the sweep log, if it's allowed to (reports.js).
   let report_written = null;
-  if (payload.reported_status) {
-    const report = callReport(payload, await currentStatus(payload.address, now, payload.subject_name), now);
-    if (report && !report.skip) {
-      await writeReport(report, now);
-      report_written = report.status;
-    } else if (report?.skip) {
-      decision.reason += `; not recorded: ${report.skip}`;
+  const early = earlyReports.get(payload.call_id);
+  earlyReports.delete(payload.call_id);
+  if (early?.id && early.reported === payload.reported_status && early.by === payload.reported_by) {
+    // Already written while the caller was talking: the agent's log confirms it.
+    report_written = early.status;
+  } else {
+    // The final report differs from the early guess (or there is none): take the guess back.
+    if (early?.id) await unwriteReport(early);
+    if (payload.reported_status) {
+      const report = callReport(payload, await currentStatus(payload.address, now, payload.subject_name), now);
+      if (report && !report.skip) {
+        await writeReport(report, now);
+        report_written = report.status;
+      } else if (report?.skip) {
+        decision.reason += `; not recorded: ${report.skip}`;
+      }
     }
   }
 
@@ -480,6 +541,7 @@ export const getCall = (callId) => calls.get(callId);
 // repeat-caller counts would include calls from before the reset.
 export function forgetAllCalls() {
   calls.clear();
+  earlyReports.clear();
   fakeReports.clear();
   // reset-demo may have just replaced the households; re-read them on the next lookup.
   households = { at: 0, rows: null };

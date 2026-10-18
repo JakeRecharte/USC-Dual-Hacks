@@ -9,7 +9,7 @@ import * as backend from './backend.js';
 import { dbHealth } from './db.js';
 import { FRESH_MIN } from './routing.js';
 import { NAME_GIVE_UP, sayForLookup, sayForRouting, sayRelativeOut, sayResidentLeft, sayResidentOut } from './speech.js';
-import { callerLines, reconcileReport } from './report-intent.js';
+import { callerLines, earlyReport, reconcileReport } from './report-intent.js';
 
 const app = Fastify({ logger: { level: 'info' } });
 const retell = config.retellApiKey ? new Retell({ apiKey: config.retellApiKey }) : null;
@@ -68,6 +68,18 @@ function noteCallerState(callId, state, source) {
   return worst;
 }
 
+// As soon as the house is identified and the caller has clearly said where the person is,
+// write it, so the board changes colour mid-call. log_call confirms or takes it back.
+function tryEarlyReport(callId, log) {
+  const s = sessions.get(callId);
+  if (!s?.lookup?.found || !s.lookup.name_match || !s.address) return;
+  const early = earlyReport(callerLines(s.transcript, 4));
+  if (!early) return;
+  void backend.recordEarly(callId, { address: s.address, subject_name: s.subject_name, ...early }).then((r) => {
+    if (r) log.info({ call_id: callId, status: r.status }, 'early report written');
+  });
+}
+
 app.post('/fn/lookup_address', { preHandler: verifyRetell }, async (req, reply) => {
   const { call, args } = argsOf(req.body);
   const now = Date.now();
@@ -83,6 +95,7 @@ app.post('/fn/lookup_address', { preHandler: verifyRetell }, async (req, reply) 
 
   setImmediate(() => {
     sessions.upsert(call.call_id, { address: args.address, subject_name: args.subject_name, lookup, name_misses: misses });
+    tryEarlyReport(call.call_id, req.log);
     backend.patchCall(call.call_id, {
       address: args.address, subject_name: args.subject_name, address_id: lookup.address_id,
       lookup_found: lookup.found, lookup_status: lookup.status, name_match: lookup.name_match,
@@ -186,6 +199,7 @@ app.post('/webhook/retell', { preHandler: verifyRetell }, async (req, reply) => 
         started_at: new Date(call.start_timestamp || Date.now()).toISOString(), simulated: Boolean(call.simulated) });
     } else if (event === 'transcript_updated') {
       const s = sessions.upsert(call.call_id, { transcript: call.transcript });
+      tryEarlyReport(call.call_id, req.log);
       const distress = scoreDistress(call);
       if (distress.score !== (s.distress_score ?? 0)) {
         // Gauge for the board: how distressed the caller's words read, live.
@@ -293,7 +307,9 @@ app.get('/health', async () => ({ ok: true, data: dbHealth }));
 
 // Server-sent events: every bus event, live. The console opens one EventSource and never
 // polls. First message is a full snapshot so a reconnect starts from current state.
-const STREAMED = ['lookup', 'call_logged', 'bypass', 'emotion', 'transfer_failed', 'call_started', 'call_ended', 'call_analyzed'];
+const STREAMED = ['lookup', 'call_logged', 'bypass', 'emotion', 'transfer_failed', 'call_started', 'call_ended', 'call_analyzed', 'house'];
+// A call recoloured a house: stream it so the board paints it at once.
+backend.houseEvents.on('house', (h) => sessions.bus.emit('house', h));
 app.get('/events', (req, reply) => {
   reply.hijack();
   reply.raw.writeHead(200, {

@@ -502,3 +502,24 @@ test('report: "they\'re out" is answered by the agent, with them or not; "stayin
   assert.equal(route({ ...base, with_them_now: true, reported_status: 'out', emergency: true }, lookup, now).routing, 'human_now');
   assert.equal(route({ ...base, with_them_now: true, reported_status: 'out', caller_state: 'panicked' }, lookup, now).routing, 'human_now');
 });
+
+// The colour changes while the caller is talking: recordEarly writes the report as soon as
+// it's said; log_call confirms it, or takes it back when the final report differs.
+test('early report: written mid-call, confirmed by log_call, taken back when the log disagrees', async () => {
+  const { recordEarly } = await import('../src/backend.js');
+  forgetAllCalls();
+  const who = { address: '16800 Bollinger Dr', subject_name: 'Ruth Adams' };
+  const early = await recordEarly('early-1', { ...who, reported_status: 'out', reported_by: 'relative_or_friend' }, now);
+  assert.equal(early.status, 'in_transit');
+  assert.equal((await lookupAddress(who, now)).status, 'in_transit', 'the house moved before the call was logged');
+  const { row } = await logCall({ ...base('early-1', '+13105550901'), ...who, reported_status: 'out', reported_by: 'relative_or_friend' }, now);
+  assert.equal(row.report_written, 'in_transit');
+
+  forgetAllCalls();
+  await recordEarly('early-2', { ...who, reported_status: 'staying', reported_by: 'relative_or_friend' }, now);
+  assert.equal((await lookupAddress(who, now)).status, 'refused');
+  const second = await logCall({ ...base('early-2', '+13105550902'), ...who }, now);
+  assert.equal(second.row.report_written, null);
+  assert.notEqual((await lookupAddress(who, now)).status, 'refused', 'the agent did not confirm it, so the early write is gone');
+  forgetAllCalls();
+});
