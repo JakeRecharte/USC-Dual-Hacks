@@ -27,7 +27,7 @@ const calls = await readFile(here('calls.sql'), 'utf8');
 // three-argument form, so it has to come last. (Before this list existed, a project built from
 // this file had no `houses` table at all: the board fell back to its own status colours and
 // Retell calls never recoloured a house.)
-const LAYERS = ['calls_retell.sql', 'calls_map.sql', 'houses.sql', 'house_colors.sql'];
+const LAYERS = ['calls_retell.sql', 'calls_map.sql', 'houses.sql', 'house_colors.sql', 'block_invented_data.sql'];
 const layers = await Promise.all(LAYERS.map(async (name) => [name, (await readFile(here(name), 'utf8')).trimEnd()]));
 // The seed moved out of §3 and into its own file once it passed three thousand lines.
 const seedFile = await readFile(here('../seed.sql'), 'utf8');

@@ -15,6 +15,8 @@
 --      turns the house red with an event that says grey -> red
 --   4. an officer tap recolours a house but raises no Retell event
 --   5. the signed-in dashboards can read the result, and anon (the public key) reads nothing
+--   7. the guard against the old invented seed is installed and refuses a bulk load of statuses
+--      and a household created already marked destroyed (docs/sql/block_invented_data.sql)
 --   6. a newer status closes an urgent call out (red -> green), and a stored green whose
 --      clear has gone stale is recoloured by expire_house_colors(), which pg_cron runs each minute
 
@@ -41,6 +43,8 @@ declare
   cnt2       int;
   layers_ok  boolean;
   expired    int;
+  guard_ok   boolean;
+  refused    boolean;
   published  text[];
   want       text[] := array['status_log', 'addresses', 'calls', 'houses', 'house_events'];
 begin
@@ -86,6 +90,12 @@ begin
   res := pg_temp.chk(res, 'pg_cron runs expire_house_colors() every minute', cnt = 1,
     case when to_regclass('cron.job') is null then 'pg_cron is not enabled' else cnt || ' jobs' end,
     'enable pg_cron (Dashboard -> Database -> Extensions), then re-run docs/sql/house_colors.sql; until then a green house stays green after its clear goes stale');
+
+  -- The guard that keeps the invented demo seed out.
+  select count(*) = 3 into guard_ok from pg_trigger t
+    where not t.tgisinternal and t.tgname in ('status_log_no_bulk_load', 'addresses_no_seeded_damage', 'addresses_no_bulk_damage');
+  res := pg_temp.chk(res, 'the guard against the old invented seed is installed', guard_ok,
+    null, 'run docs/sql/block_invented_data.sql');
 
   -- 2. Realtime publishes what the dashboards subscribe to. ---------------------------------
   select coalesce(array_agg(p.tablename::text), '{}') into published from pg_publication_tables p where p.pubname = 'supabase_realtime';
@@ -194,6 +204,28 @@ begin
         select hs.color into col from public.houses hs where hs.id = h3;
         res := pg_temp.chk(res, 'expire_house_colors() recolours a green whose clear went stale', col <> 'green' and expired >= 1,
           'color is ' || coalesce(col, 'null') || ', ' || expired || ' recoloured');
+
+        -- The old invented seed: thousands of statuses in one statement, houses created already
+        -- destroyed. Each attempt is its own sub-block, so a refusal is caught here and the
+        -- scenario carries on. (On a project without the guard, the attempt succeeds and is
+        -- rolled back with everything else below.)
+        if guard_ok then
+          begin
+            insert into public.status_log (address_id, status, source, recorded_at)
+              select h, 'cleared', 'officer', now() from generate_series(1, 101);
+            refused := false;
+          exception when others then refused := sqlerrm like 'refused:%';
+          end;
+          res := pg_temp.chk(res, 'a bulk load of 101 statuses in one statement is refused', refused);
+
+          begin
+            insert into public.addresses (address, lat, lng, zone_id, resident_name, structure)
+              values ('1 Check St', 34.04, -118.53, 'PAL-01', 'Check Test', 'destroyed');
+            refused := false;
+          exception when others then refused := sqlerrm like 'refused:%';
+          end;
+          res := pg_temp.chk(res, 'a household created already marked destroyed is refused', refused);
+        end if;
       end if;
 
       raise exception 'rolled back' using errcode = 'RB001';
