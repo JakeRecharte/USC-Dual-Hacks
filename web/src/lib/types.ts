@@ -54,10 +54,23 @@ export interface AddressRow {
  */
 export type HouseColor = 'green' | 'yellow' | 'orange' | 'red' | 'grey';
 
+/**
+ * houses.fire_threat_level: per street, from research (docs/research/street-threat.json, loaded
+ * by `npm run apply-threat`). Null/absent = not assessed.
+ */
+export type ThreatLevel = 'extreme' | 'high' | 'moderate' | 'low';
+
 export interface AddressState extends AddressRow {
   /** Supabase's colour for this house; absent until house_colors.sql has run. */
   color?: HouseColor | null;
   color_reason?: string | null;
+  /** The street's researched fire threat (houses.fire_threat_level). Absent until apply-threat has run. */
+  threat?: ThreatLevel | null;
+  /**
+   * How long a clear is trusted, in minutes, when this row is judged by something other than the
+   * board's two hours. Only the scenario sets it; absent means priority.ts's FRESH_MIN.
+   */
+  fresh_min?: number;
   status: Status;
   source: Source | null;
   /** ISO string, or null when nothing has ever been recorded. Always shown to the user. */
@@ -87,6 +100,28 @@ export interface CallRow {
   caller_state?: CallerState | null;
   /** Keyword score of the caller's words. 3 or more is what trips a handoff. */
   distress_score?: number;
+  /** What to send, for a dispatcher to confirm (DATA_CONTRACT §8). Only the scenario fills it today. */
+  suggestions?: Suggestion[];
+  /** The status the line wrote for this call's report (server reports.js), as the phone line streams it. */
+  report_written?: Status | null;
+  /** What the caller said about the household, in the agent's words. */
+  caller_update?: string | null;
+  /** Other people who already called about this address. */
+  prior_callers?: number;
+  /** A real call taken into the scenario (it carries its own effect and locks its house). */
+  live?: boolean;
+}
+
+/** DATA_CONTRACT §8: how soon a suggested resource is wanted. `none` marks a trip avoided. */
+export type SuggestionPriority = 'now' | 'soon' | 'when_free' | 'none';
+
+/** One suggested resource and the facts behind it. Nothing is dispatched until a person confirms. */
+export interface Suggestion {
+  id: string;
+  resource: string;
+  priority: SuggestionPriority;
+  why: string[];
+  requires_confirmation: boolean;
 }
 
 export const STATUS_LABEL: Record<Status, string> = {

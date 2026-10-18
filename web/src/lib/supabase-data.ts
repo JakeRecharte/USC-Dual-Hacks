@@ -14,7 +14,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 // below are erased, so they need none.
 import { PERIMETER } from './zones.ts';
 import { pointInPolygon } from './geo.ts';
-import type { AddressState, HouseColor, Source, Status, Structure } from './types';
+import type { AddressState, HouseColor, Source, Status, Structure, ThreatLevel } from './types';
 
 export const ADDRESS_COLUMNS = 'id, address, lat, lng, zone_id, resident_name';
 export const STATUS_COLUMNS = 'address_id, status, source, note, recorded_at';
@@ -106,6 +106,7 @@ interface HouseColorRowDb {
   id: string;
   color: string | null;
   color_reason: string | null;
+  fire_threat_level?: string | null;
 }
 
 /** Everything the board needs: every household, every status, and Supabase's colours. */
@@ -133,17 +134,25 @@ export async function fetchBoard(client: SupabaseClient): Promise<AddressState[]
   }
 
   // Colours are optional: before house_colors.sql runs the board keeps its own status colours.
+  // The street's fire threat rides along (houses.sql has it); if that column is somehow missing
+  // the colours are asked for again without it rather than lost.
   let colors: HouseColorRowDb[] = [];
   try {
-    colors = await fetchAll<HouseColorRowDb>((from, to) => client.from('houses').select('id, color, color_reason').order('id').range(from, to));
+    colors = await fetchAll<HouseColorRowDb>((from, to) =>
+      client.from('houses').select('id, color, color_reason, fire_threat_level').order('id').range(from, to));
   } catch {
-    colors = [];
+    try {
+      colors = await fetchAll<HouseColorRowDb>((from, to) => client.from('houses').select('id, color, color_reason').order('id').range(from, to));
+    } catch {
+      colors = [];
+    }
   }
 
   return withColors(joinRows(addresses, statuses), colors);
 }
 
 const HOUSE_COLORS: HouseColor[] = ['green', 'yellow', 'orange', 'red', 'grey'];
+const THREAT_LEVELS: ThreatLevel[] = ['extreme', 'high', 'moderate', 'low'];
 
 /**
  * One house from a Realtime houses row: its colour and its newest status. Fields the row
@@ -155,6 +164,7 @@ export function patchFromHouse(a: AddressState, row: Record<string, unknown>): A
     next.color = row.color as HouseColor;
     next.color_reason = (row.color_reason as string | null) ?? null;
   }
+  if (THREAT_LEVELS.includes(row.fire_threat_level as ThreatLevel)) next.threat = row.fire_threat_level as ThreatLevel;
   if (typeof row.evacuation_status === 'string') next.status = row.evacuation_status as Status;
   if ('evacuation_note' in row) next.note = (row.evacuation_note as string | null) ?? null;
   if ('evacuation_status_source' in row) next.source = (row.evacuation_status_source as AddressState['source']) ?? null;
@@ -162,13 +172,22 @@ export function patchFromHouse(a: AddressState, row: Record<string, unknown>): A
   return next;
 }
 
-/** Attach Supabase's colour to each household; unknown values are ignored, not trusted. */
+/**
+ * Attach Supabase's colour and the street's fire threat to each household; unknown values are
+ * ignored, not trusted. The two are independent: a house can have a threat and no colour yet.
+ */
 export function withColors(rows: AddressState[], colors: HouseColorRowDb[]): AddressState[] {
   const byId = new Map(colors.map((c) => [c.id, c]));
   return rows.map((r) => {
     const c = byId.get(r.id);
-    if (!c || !HOUSE_COLORS.includes(c.color as HouseColor)) return r;
-    return { ...r, color: c.color as HouseColor, color_reason: c.color_reason ?? null };
+    if (!c) return r;
+    const next: AddressState = { ...r };
+    if (HOUSE_COLORS.includes(c.color as HouseColor)) {
+      next.color = c.color as HouseColor;
+      next.color_reason = c.color_reason ?? null;
+    }
+    if (THREAT_LEVELS.includes(c.fire_threat_level as ThreatLevel)) next.threat = c.fire_threat_level as ThreatLevel;
+    return next;
   });
 }
 

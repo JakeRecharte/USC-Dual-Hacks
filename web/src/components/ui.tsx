@@ -50,12 +50,21 @@ export function StructureChip({ structure }: { structure: Structure }) {
   );
 }
 
-/** The Line mark: a locator ring around a house dot. */
+/** The Line mark: a house in amber line art, inside a rounded outline. */
 export function Mark({ className = 'h-6 w-6' }: { className?: string }) {
   return (
-    <svg viewBox="0 0 24 24" aria-hidden className={className}>
-      <rect x="1" y="1" width="22" height="22" rx="6" fill="var(--clear)" />
-      <path d="M12 5.5 6 10.5V18h4v-4h4v4h4v-7.5L12 5.5Z" fill="var(--bg)" />
+    <svg
+      viewBox="0 0 24 24"
+      aria-hidden
+      fill="none"
+      stroke="var(--high)"
+      strokeWidth="1.75"
+      strokeLinejoin="round"
+      strokeLinecap="round"
+      className={className}
+    >
+      <rect x="1.9" y="1.9" width="20.2" height="20.2" rx="5.5" />
+      <path d="M12 5.8 6.2 10.4V18h3.8v-4.2h4V18h3.8v-7.6L12 5.8Z" />
     </svg>
   );
 }

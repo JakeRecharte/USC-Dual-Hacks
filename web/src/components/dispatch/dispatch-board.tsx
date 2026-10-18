@@ -18,8 +18,10 @@ import {
 import { CALLER_STATE_LABEL, DISTRESS_THRESHOLD, ROUTING_LABEL, ROUTING_RANK, STATUS_LABEL } from '@/lib/types';
 import type { AddressState, CallRow, CallerState, HouseColor, Status } from '@/lib/types';
 import { telephonyConfigured, useAddresses, useCalls, useNow } from '@/lib/use-live';
+import { useScenario, type Decision } from '@/lib/scenario/use-scenario';
 import { ConnectionDot, Mark, SignOutButton, StatusChip, StructureChip } from '@/components/ui';
 import { RetellAlerts } from './retell-alerts';
+import { CallSuggestions, ModeSwitch, ScenarioBar, ScenarioPanel, simClock, simDate } from './scenario-ui';
 
 // Leaflet touches `window` at import time, so the map only ever loads in the browser.
 const ZoneMap = dynamic(() => import('./zone-map').then((m) => m.ZoneMap), {
@@ -32,9 +34,17 @@ const ZoneMap = dynamic(() => import('./zone-map').then((m) => m.ZoneMap), {
 });
 
 export function DispatchBoard() {
-  const { addresses, connection, mode: dataMode, gated, error } = useAddresses();
-  const { calls, connection: callFeed } = useCalls();
-  const now = useNow(15_000);
+  const { addresses: liveAddresses, connection, mode: dataMode, gated, error } = useAddresses();
+  const { calls: liveCalls, connection: callFeed } = useCalls();
+  const liveNow = useNow(15_000);
+
+  // The scenario is a layer over the live board: while it is on, everything below reads from its
+  // snapshot instead, and the live feeds keep running unseen. It never writes to either.
+  const scenario = useScenario(liveAddresses, liveCalls);
+  const sim = scenario.active ? scenario.snapshot : null;
+  const addresses = sim?.addresses ?? liveAddresses;
+  const calls = sim?.calls ?? liveCalls;
+  const now = sim?.now ?? liveNow;
 
   const [focusId, setFocusId] = useState<string | null>(null);
 
@@ -50,7 +60,7 @@ export function DispatchBoard() {
       total: inPerimeter.length,
       refused: inPerimeter.filter((a) => a.status === 'refused').length,
       neverContacted: inPerimeter.filter((a) => !a.recorded_at).length,
-      stale: inPerimeter.filter((a) => isStale(a.status, a.recorded_at, now)).length,
+      stale: inPerimeter.filter((a) => isStale(a.status, a.recorded_at, now, a.fresh_min)).length,
       destroyed: inPerimeter.filter((a) => a.structure === 'destroyed').length,
     };
   }, [inPerimeter, now]);
@@ -84,19 +94,37 @@ export function DispatchBoard() {
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-xs">
-            <ConnectionDot
-              state={connection}
-              label={`${dataMode === 'supabase' ? 'Records' : 'Records (local)'} ${connection}`}
-            />
-            <ConnectionDot
-              state={callFeed}
-              label={telephonyConfigured ? `Phone line ${callFeed}` : 'Phone line not connected'}
-            />
-            <span className="text-muted" suppressHydrationWarning>
-              {today.toLocaleDateString('en-US', { weekday: 'short', day: 'numeric', month: 'short' })}{' '}
-              <span className="figure text-text">
-                {today.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false })}
+            <ModeSwitch active={scenario.active} disabled={liveAddresses.length === 0} onChange={scenario.setActive} />
+            {sim ? (
+              <span className="inline-flex items-center gap-1.5 text-xs text-high">
+                <span aria-hidden className="h-2 w-2 rounded-full bg-high" />
+                Simulated data
               </span>
+            ) : (
+              <>
+                <ConnectionDot
+                  state={connection}
+                  label={`${dataMode === 'supabase' ? 'Records' : 'Records (local)'} ${connection}`}
+                />
+                <ConnectionDot
+                  state={callFeed}
+                  label={telephonyConfigured ? `Phone line ${callFeed}` : 'Phone line not connected'}
+                />
+              </>
+            )}
+            <span className="text-muted" suppressHydrationWarning>
+              {sim ? (
+                <>
+                  {simDate(now)} <span className="figure text-text">{simClock(now)}</span>
+                </>
+              ) : (
+                <>
+                  {today.toLocaleDateString('en-US', { weekday: 'short', day: 'numeric', month: 'short' })}{' '}
+                  <span className="figure text-text">
+                    {today.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false })}
+                  </span>
+                </>
+              )}
             </span>
             <span className="flex items-center gap-1.5 lg:hidden">
               <SignOutButton />
@@ -104,12 +132,31 @@ export function DispatchBoard() {
           </div>
         </header>
 
-        {error && (
+        {sim && (
+          <ScenarioBar
+            now={now}
+            min={scenario.min}
+            endMin={scenario.endMin}
+            playing={scenario.playing}
+            speed={scenario.speed}
+            latest={sim.beats[0]}
+            ready={scenario.ready}
+            takeLive={scenario.takeLive}
+            onTakeLive={scenario.setTakeLive}
+            live={sim.live}
+            telephonyConfigured={telephonyConfigured}
+            onToggle={scenario.togglePlay}
+            onRestart={scenario.restart}
+            onSeek={scenario.seek}
+            onSpeed={scenario.setSpeed}
+          />
+        )}
+        {!sim && error && (
           <p role="alert" className="mx-5 mt-4 rounded-md bg-critical/10 px-3.5 py-2.5 text-xs leading-relaxed text-critical">
             {error}
           </p>
         )}
-        {!gated && (
+        {!sim && !gated && (
           <p className="mx-5 mt-4 rounded-md bg-high/10 px-3.5 py-2.5 text-xs leading-relaxed text-high">
             Database reads are not behind the shift code: SUPABASE_JWT_SECRET is not set, so the
             anon key alone can read resident names. Set it before this is reachable publicly —
@@ -117,7 +164,7 @@ export function DispatchBoard() {
           </p>
         )}
 
-        <RetellAlerts />
+        {!sim && <RetellAlerts />}
 
         <div className="grid flex-1 gap-4 p-4 lg:grid-cols-[minmax(0,1fr)_420px]">
           <section id="map" className="flex min-w-0 flex-col gap-4">
@@ -127,10 +174,11 @@ export function DispatchBoard() {
                 now={now}
                 focusId={focusId}
                 onSelect={setFocusId}
+                fire={sim?.fire ?? null}
               />
 
               <div className="pointer-events-none absolute inset-x-0 top-0 z-[500] flex flex-wrap items-start justify-between gap-2 p-3">
-                <Legend />
+                <Legend freshHours={sim ? sim.freshMin / 60 : 2} fire={Boolean(sim)} />
               </div>
             </div>
 
@@ -165,9 +213,17 @@ export function DispatchBoard() {
           {/* On wide screens the sidebar takes its height from the map column instead of setting
               it: h-0 keeps its content out of the row's sizing and min-h-full stretches it back.
               Without this a long door-knock list makes the row (and so the map) thousands of px tall. */}
-          <aside className="flex min-w-0 flex-col gap-4 lg:h-0 lg:min-h-full">
-            <CallQueue calls={queue} now={now} configured={telephonyConfigured} />
-            <DoorKnockPanel knocks={knocks} now={now} onFocus={setFocusId} focusId={focusId} />
+          <aside className={`flex min-w-0 flex-col gap-4 lg:h-0 lg:min-h-full ${sim ? 'lg:overflow-y-auto' : ''}`}>
+            {sim && (
+              <ScenarioPanel suggestions={sim.suggestions} beats={sim.beats} decisions={scenario.decisions} onDecide={scenario.decide} />
+            )}
+            <CallQueue
+              calls={queue}
+              now={now}
+              configured={sim ? true : telephonyConfigured}
+              scenario={sim ? { decisions: scenario.decisions, onDecide: scenario.decide } : undefined}
+            />
+            <DoorKnockPanel knocks={knocks} now={now} onFocus={setFocusId} focusId={focusId} stacked={Boolean(sim)} />
           </aside>
         </div>
       </div>
@@ -302,11 +358,11 @@ function StatusBar({ addresses }: { addresses: AddressState[] }) {
 }
 
 /** What each house colour means (docs/sql/house_colors.sql; priority.ts draws the same five). */
-const HOUSE_LEGEND_ITEMS: { color: HouseColor; label: string }[] = [
+const houseLegendItems = (freshHours: number): { color: HouseColor; label: string }[] => [
   { color: 'red', label: 'Refused, or a caller needs a person' },
   { color: 'orange', label: 'No answer at the door' },
   { color: 'yellow', label: 'Evacuating' },
-  { color: 'green', label: 'Cleared in the last 2 hours' },
+  { color: 'green', label: `Cleared in the last ${freshHours} hours` },
   { color: 'grey', label: 'Unknown, or the clear is stale' },
 ];
 
@@ -315,7 +371,7 @@ const HOUSE_LEGEND_ITEMS: { color: HouseColor; label: string }[] = [
  * five house colours whether Supabase supplied them or the same rule was worked out locally
  * (houseColor() in priority.ts), so this key always matches what is drawn.
  */
-function Legend() {
+function Legend({ freshHours, fire }: { freshHours: number; fire: boolean }) {
   const [open, setOpen] = useState(true);
   return (
     <div className="pointer-events-auto w-48 rounded-lg border border-paper-rule bg-paper-card/95 px-3 py-2.5 shadow-[0_12px_28px_-16px_rgba(43,29,18,.5)] backdrop-blur sm:w-56">
@@ -335,7 +391,7 @@ function Legend() {
 
       <div id="map-legend-body" hidden={!open}>
         <ul className="mt-2 grid gap-1">
-          {HOUSE_LEGEND_ITEMS.map((i) => (
+          {houseLegendItems(freshHours).map((i) => (
             <li key={i.color} className="flex items-center gap-2 text-[11px] text-paper-ink-2">
               <span
                 aria-hidden
@@ -355,6 +411,16 @@ function Legend() {
           />
           Building, no record
         </div>
+        {fire && (
+          <div className="mt-1.5 flex items-center gap-2 text-[11px] text-paper-ink-2">
+            <span
+              aria-hidden
+              className="inline-block h-2.5 w-4 shrink-0 rounded-[2px] border border-[#d6342a]"
+              style={{ backgroundImage: 'repeating-linear-gradient(135deg, #d6342a 0 1px, transparent 1px 4px)' }}
+            />
+            Fire, simulated spread
+          </div>
+        )}
         <p className="mt-1.5 text-[11px] leading-snug text-paper-soft">
           Dashed outline is the active fire perimeter.
         </p>
@@ -462,15 +528,18 @@ function CallQueue({
   calls,
   now,
   configured,
+  scenario,
 }: {
   calls: CallRow[];
   now: number;
   configured: boolean;
+  /** Present only in the scenario: lets a dispatcher confirm or dismiss what the line suggests. */
+  scenario?: { decisions: Record<string, Decision>; onDecide: (key: string, decision: Decision | null) => void };
 }) {
   return (
-    <section id="calls" className="flex min-h-0 flex-col rounded-lg border border-line bg-panel">
+    <section id="calls" className={`flex min-h-0 flex-col rounded-lg border border-line bg-panel ${scenario ? 'shrink-0' : ''}`}>
       <PanelHead title="Incoming calls" order="needs a person first" count={calls.length} />
-      <div className="max-h-[42vh] overflow-y-auto">
+      <div className={`${scenario ? 'max-h-[30vh]' : 'max-h-[42vh]'} overflow-y-auto`}>
         {calls.length === 0 ? (
           <div className="px-4 py-6 text-[13px] leading-relaxed text-muted">
             <p>No calls waiting. When someone calls the line, the call shows up here.</p>
@@ -484,11 +553,16 @@ function CallQueue({
               <li key={c.call_id || c.id} className="px-4 py-3.5">
                 <div className="flex items-center justify-between gap-2">
                   <span className="flex min-w-0 items-center gap-2">
-                    <span className="figure text-[13px] font-medium">#{(c.call_id || c.id).replace(/[^a-z0-9]/gi, '').slice(-6)}</span>
+                    <span className="figure text-[13px] font-medium">#{shortCallId(c.call_id || c.id)}</span>
                     <span className="chip" style={{ '--tone': ROUTING_TONE[c.routing] } as React.CSSProperties}>
                       {c.bypass && <span aria-hidden>⚡</span>}
                       {ROUTING_LABEL[c.routing]}
                     </span>
+                    {c.live && (
+                      <span className="chip" style={{ '--tone': 'var(--info)' } as React.CSSProperties} title="A real call, taken into the simulation. Its house is frozen for the rest of it.">
+                        LIVE CALL
+                      </span>
+                    )}
                   </span>
                   <span className="figure shrink-0 text-[11px] text-muted">
                     {relativeMinutes(Math.round(ageMinutes(c.created_at, now)))}
@@ -513,6 +587,9 @@ function CallQueue({
                   {c.mode === 'routine' && ' · routine check'}
                 </p>
                 <EmotionGauge state={c.caller_state} score={c.distress_score} />
+                {scenario && c.suggestions && c.suggestions.length > 0 && (
+                  <CallSuggestions callId={c.call_id || c.id} suggestions={c.suggestions} decisions={scenario.decisions} onDecide={scenario.onDecide} />
+                )}
               </li>
             ))}
           </ul>
@@ -520,6 +597,13 @@ function CallQueue({
       </div>
     </section>
   );
+}
+
+/** The last six characters of a call id; a simulated call is numbered, not truncated. */
+function shortCallId(id: string): string {
+  const bare = id.replace(/[^a-z0-9]/gi, '');
+  if (bare.startsWith('live')) return bare.slice(-6);
+  return bare.startsWith('sim') ? bare.slice(3) : bare.slice(-6);
 }
 
 /** How many rows the lists render. The rest are counted, not drawn. */
@@ -530,15 +614,21 @@ function DoorKnockPanel({
   now,
   onFocus,
   focusId,
+  stacked,
 }: {
   knocks: AddressState[];
   now: number;
   onFocus: (id: string) => void;
   focusId: string | null;
+  /** Under the scenario's panels, which scroll the column: keep a readable height rather than taking what is left. */
+  stacked?: boolean;
 }) {
   const shown = knocks.slice(0, LIST_LIMIT);
   return (
-    <section id="knocks" className="flex min-h-0 flex-1 flex-col rounded-lg border border-line bg-panel">
+    <section
+      id="knocks"
+      className={`flex flex-col rounded-lg border border-line bg-panel ${stacked ? 'max-h-[480px] min-h-[260px] shrink-0' : 'min-h-0 flex-1'}`}
+    >
       <PanelHead title="Doors to knock" order="worst first, tap to find" count={knocks.length} />
       <div className="min-h-0 flex-1 overflow-y-auto">
         {knocks.length === 0 ? (
