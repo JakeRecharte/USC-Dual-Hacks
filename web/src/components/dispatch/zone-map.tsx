@@ -14,6 +14,7 @@ import { describeMapError } from '@/lib/webgl';
 import { HOUSE_COLOR, houseColor, reasonOf } from '@/lib/priority';
 import { STATUS_LABEL, STRUCTURE_LABEL } from '@/lib/types';
 import type { AddressState } from '@/lib/types';
+import type { FireFront } from '@/lib/scenario/fire';
 
 /**
  * maplibre-gl v5 resolves to named exports under CJS and a default-only object under ESM,
@@ -26,6 +27,9 @@ const maplibregl = ((maplibreNs as unknown as { default?: typeof maplibreNs }).d
 const PAPER = '#f4efe6';
 const CONTEXT = '#7d8a96';
 const LABELS = 'basemap-labels';
+/** The simulated fire: a brighter red than the houses' brick red, so a refusing house inside it still reads. */
+const FIRE_RED = '#d6342a';
+const FIRE_STRIPES = 'fire-stripes';
 
 /**
  * The frame is locked to Pacific Palisades. This board covers one incident, so panning off
@@ -242,11 +246,14 @@ export function ZoneMap({
   now,
   focusId,
   onSelect,
+  fire = null,
 }: {
   addresses: AddressState[];
   now: number;
   focusId: string | null;
   onSelect: (id: string) => void;
+  /** The scenario's simulated fire at this minute, drawn as an outlined, striped area. Absent on the live board. */
+  fire?: FireFront | null;
 }) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MlMap | null>(null);
@@ -256,6 +263,8 @@ export function ZoneMap({
   // Latest data, so the load handler can paint whatever has arrived by then.
   const dataRef = useRef({ addresses, now });
   dataRef.current = { addresses, now };
+  const fireRef = useRef(fire);
+  fireRef.current = fire;
   const outlinesRef = useRef<Outlines | null>(null);
 
   const [mapError, setMapError] = useState<string | null>(null);
@@ -324,6 +333,7 @@ export function ZoneMap({
         },
       });
       map.addSource('context-buildings', { type: 'geojson', data: emptyCollection() });
+      map.addSource('fire', { type: 'geojson', data: fireCollection(fireRef.current) });
       map.addSource('households', { type: 'geojson', data: emptyCollection() });
       // Stand in for the outlines when zoomed out far enough that a footprint is smaller
       // than a pixel.
@@ -347,6 +357,23 @@ export function ZoneMap({
           'fill-color': CONTEXT,
           'fill-opacity': ['interpolate', ['linear'], ['zoom'], 13.5, 0, 15, 0.28],
           'fill-outline-color': '#b9c2cb',
+        },
+      }, LABELS);
+
+      // The scenario's fire: thin red stripes inside a solid red edge. Over the grey buildings, under
+      // the households, so a house that is refusing or waiting inside it is still the first thing seen.
+      map.addImage(FIRE_STRIPES, fireStripes(), { pixelRatio: 2 });
+      map.addLayer({
+        id: 'fire-fill', type: 'fill', source: 'fire',
+        paint: { 'fill-pattern': FIRE_STRIPES, 'fill-opacity': 0.9 },
+      }, LABELS);
+      map.addLayer({
+        id: 'fire-line', type: 'line', source: 'fire',
+        layout: { 'line-join': 'round' },
+        paint: {
+          'line-color': FIRE_RED,
+          'line-width': ['interpolate', ['linear'], ['zoom'], 12, 1.4, 16, 2.4],
+          'line-opacity': 0.95,
         },
       }, LABELS);
 
@@ -407,6 +434,13 @@ export function ZoneMap({
     paint(map, addresses, now, outlinesRef.current);
   }, [addresses, now]);
 
+  // The fire moves with the scenario's clock; on the live board there is none and the layer is empty.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !readyRef.current) return;
+    (map.getSource('fire') as maplibregl.GeoJSONSource | undefined)?.setData(fireCollection(fire));
+  }, [fire]);
+
   // Clicking a row in the lists flies to that household.
   useEffect(() => {
     const map = mapRef.current;
@@ -433,6 +467,41 @@ export function ZoneMap({
 }
 
 const emptyCollection = (): GeoJSON.FeatureCollection => ({ type: 'FeatureCollection', features: [] });
+
+/** One polygon per burning area. */
+const fireCollection = (fire: FireFront | null): GeoJSON.FeatureCollection => ({
+  type: 'FeatureCollection',
+  features: (fire?.rings ?? []).map((ring) => ({
+    type: 'Feature',
+    properties: {},
+    geometry: { type: 'Polygon', coordinates: [ring] },
+  })),
+});
+
+/**
+ * One repeating tile of diagonal stripes, drawn per pixel so it needs no canvas: a stripe runs
+ * wherever x + y is near a multiple of the tile size, which tiles without a seam. Drawn at twice
+ * the pixel ratio, so a stripe is about a pixel thick and eight pixels apart.
+ */
+function fireStripes(): { width: number; height: number; data: Uint8Array } {
+  const size = 16;
+  const halfWidth = 1.05;
+  const [r, g, b] = [0xd6, 0x34, 0x2a];
+  const data = new Uint8Array(size * size * 4);
+  for (let y = 0; y < size; y += 1) {
+    for (let x = 0; x < size; x += 1) {
+      const along = (x + y + 1) % size;
+      const across = Math.min(along, size - along) / Math.SQRT2;
+      const alpha = Math.max(0, Math.min(1, halfWidth + 0.5 - across));
+      const i = (y * size + x) * 4;
+      data[i] = r;
+      data[i + 1] = g;
+      data[i + 2] = b;
+      data[i + 3] = Math.round(alpha * 255);
+    }
+  }
+  return { width: size, height: size, data };
+}
 
 function boundsOf(ring: LatLngTuple[]): [[number, number], [number, number]] {
   const lats = ring.map((p) => p[0]);

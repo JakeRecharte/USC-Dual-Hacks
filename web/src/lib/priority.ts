@@ -76,7 +76,7 @@ export function houseColor(a: AddressState, now: number): HouseColor {
       return 'yellow';
     case 'cleared':
     case 'self_out':
-      return isStale(a.status, a.recorded_at, now) ? 'grey' : 'green';
+      return isStale(a.status, a.recorded_at, now, a.fresh_min) ? 'grey' : 'green';
     default:
       return 'grey';
   }
@@ -88,9 +88,9 @@ export function ageMinutes(recordedAt: string | null, now: number): number {
   return Number.isFinite(t) ? (now - t) / 60000 : Infinity;
 }
 
-export function isStale(status: Status, recordedAt: string | null, now: number): boolean {
+export function isStale(status: Status, recordedAt: string | null, now: number, freshMin: number = FRESH_MIN): boolean {
   if (status !== 'cleared' && status !== 'self_out') return false;
-  return ageMinutes(recordedAt, now) > FRESH_MIN;
+  return ageMinutes(recordedAt, now) > freshMin;
 }
 
 /**
@@ -105,14 +105,14 @@ export function urgencyOf(a: AddressState, now: number): Urgency {
   }
   if (a.status === 'in_transit') return 'watch';
   // cleared or self_out: fresh is done, stale is a question again.
-  return isStale(a.status, a.recorded_at, now) ? 'watch' : 'clear';
+  return isStale(a.status, a.recorded_at, now, a.fresh_min) ? 'watch' : 'clear';
 }
 
 /** The reason the board shows under an address, always with the time it was recorded. */
 export function reasonOf(a: AddressState, now: number): string {
   if (!a.recorded_at) return 'never contacted';
   const age = Math.round(ageMinutes(a.recorded_at, now));
-  const stale = isStale(a.status, a.recorded_at, now) ? ' (stale)' : '';
+  const stale = isStale(a.status, a.recorded_at, now, a.fresh_min) ? ' (stale)' : '';
   return `${relativeMinutes(age)}${stale}`;
 }
 

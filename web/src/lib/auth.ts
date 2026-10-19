@@ -34,6 +34,15 @@ function sameString(a: string, b: string): boolean {
   return diff === 0;
 }
 
+/**
+ * The codes to print on the sign-in screen so a demo viewer can get in, or null when hidden.
+ * Read from the same table the check uses, so what's shown can never drift from what works.
+ * Set HIDE_DEMO_CODES=1 to turn the box off once the codes are meant to be private again.
+ */
+export function demoCodes(): Record<Role, string> | null {
+  return process.env.HIDE_DEMO_CODES ? null : PASSCODES;
+}
+
 export function checkPasscode(role: Role, passcode: string): boolean {
   const expected = PASSCODES[role];
   return Boolean(expected) && sameString(expected, (passcode || '').trim());
