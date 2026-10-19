@@ -18,7 +18,7 @@ const PORTALS: { role: Role; title: string; blurb: string }[] = [
   },
 ];
 
-export function SignIn({ next, showHints }: { next?: string; showHints: boolean }) {
+export function SignIn({ next, demoCodes }: { next?: string; demoCodes: Record<Role, string> | null }) {
   const router = useRouter();
   const [role, setRole] = useState<Role>('officer');
   const [passcode, setPasscode] = useState('');
@@ -145,6 +145,26 @@ export function SignIn({ next, showHints }: { next?: string; showHints: boolean 
                 {error}
               </p>
             )}
+            {demoCodes && (
+              <div className="mt-2 flex items-center justify-between gap-3 rounded-lg border border-dashed border-line bg-panel-2 px-3 py-2 text-[11px]">
+                <span className="text-muted">
+                  Demo code, {PORTALS.find((p) => p.role === role)!.title.toLowerCase()}:{' '}
+                  <span className="figure text-[13px] font-semibold tracking-[0.15em] text-text">
+                    {demoCodes[role]}
+                  </span>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPasscode(demoCodes[role]);
+                    setError(null);
+                  }}
+                  className="shrink-0 rounded-md border border-line px-2 py-1 text-[11px] font-medium text-text transition-colors hover:bg-panel"
+                >
+                  Fill it in
+                </button>
+              </div>
+            )}
           </div>
 
           <button
@@ -154,15 +174,6 @@ export function SignIn({ next, showHints }: { next?: string; showHints: boolean 
           >
             {busy ? 'Signing in…' : 'Sign in →'}
           </button>
-
-          {showHints && (
-            <p className="mt-5 border-t border-dashed border-line pt-3 text-[11px] leading-relaxed text-muted">
-              dev codes: officer <span className="text-text">1420</span> · dispatch{' '}
-              <span className="text-text">5150</span>
-              <br />
-              set OFFICER_PASSCODE / DISPATCH_PASSCODE to change
-            </p>
-          )}
         </form>
       </main>
     </div>

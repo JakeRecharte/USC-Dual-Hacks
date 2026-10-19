@@ -9,8 +9,9 @@ cp .env.local.example .env.local   # optional: every value has a default
 npm run dev                        # http://localhost:3000
 ```
 
-Sign in at `/` and pick a portal. Dev codes are **1420** (officer) and **5150** (dispatch),
-printed on the sign-in screen outside production.
+Sign in at `/` and pick a portal. The sign-in screen prints the code for the selected role in a
+small "Demo code" box with a button that fills it in. Defaults are **1420** (officer) and
+**5150** (dispatch). Set `HIDE_DEMO_CODES=1` to remove the box.
 
 | Route | Who | What |
 |---|---|---|
